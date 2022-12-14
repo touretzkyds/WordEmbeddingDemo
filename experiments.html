@@ -1,0 +1,127 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/materialize/0.100.2/css/materialize.css">
+  <link rel="stylesheet" href="tutexp-styles.css">
+  <style type="text/css">
+    tr { padding: 0px; }
+  </style>
+  <meta charset="UTF-8">
+    <title>Word Embedding Demo: Experiments</title>
+</head>
+
+<body class="center-content" style="margin-right: 50px; margin-left: 50px; max-width: 992px;">
+
+<h2 style="text-align: center;">Word Embedding Demo: Experiments</h2>
+
+<center>
+  Navigation: <a href="./index.html">Return to Demo</a> or <a href="tutorial.html">View Tutorial</a><p/>
+</center><p/>
+
+<h5> Basic Exploration </h5>
+
+The left half of the demo window is the 3D point plot.  The right half
+is the semantic feature vector display.  At the bottom of the window
+there are expandable panels that can be opened to reveal more advanced
+features.<p/>
+
+<ul>
+  <li> <b>Explore the 3D point plot:</b> Click and drag in the point
+    plot to rotate the view.  Use the scroll wheel to zoom in or out.
+    Hold down the control key and click and drag to pan the view.<p/>
+
+  <li> <b>Find closest words:</b> Put the mouse pointer over a word in
+    the 3D plot.  A window will pop up showing the 10 closest words to
+    this one.<p/>
+
+  <li> <b>Explore the feature vector display:</b> The feature vector
+    display in the right half of the window shows the embedding
+    vectors for up to six selected words.  Drag the mouse over the
+    colored bars in the display and you can read out the exact value
+    of each bar.  The current column the mouse is over is magnified
+    and shown to the left of the main display.  Column 126 correlates
+    with gender; it is tan/orange for male words and gray/blue for
+    female words.<p/>
+
+  <li> <b>Focus on a specific feature:</b> To examine feature 126,
+    drag the mouse across any of the six feature vector slots until the
+    index reads 126. Then hold down the left mouse button to freeze
+    the index and drag the mouse out of the feature vector display
+    area.  Now you can compare the values of the feature without
+    worrying that jostling the mouse will change the display.<p/>
+
+  <li> <b>Add/remove words from the 3D plot.</b> Type a word in the
+    text box below the 3D plot to add it to the plot.  Adding a word
+    also makes it the active word.  If a word is already present in
+    the plot, typing that word in the box deletes it from the plot.
+    <p/>
+
+  <li> <b>Activate a word.</b> Click on a point in the 3D plot.  This
+  becomes the "active" word and its color switches to red.<p/>
+
+  <li> <b>Copy the active word to the feature vector display.</b>
+    When a word is active, you can click on one of the slots in the
+    feature vector display and that word's vector will be copied into
+    the slot, replacing the previous contents.  The word will also be
+    deactivated.<p/>
+
+  <li> <b>Compare word similarity via dot product (cosine
+    similarity).</b> Load words into the six slots of the feature
+    vector display. Then click on a word in the 3D plot to make it
+    active, and read the similarity scores in red.<p/>  <p/>
+
+</ul>
+
+<h5> Analogies </h5>
+
+<ul>
+  <li> <b>Solve an analogy problem.</b> Open the Vector Analogy panel
+    at the bottom of the display.  Type words into the boxes and click
+    Submit to compute the result of the vector computation, shown in
+    the 3D display as a pink node.  The closest known word to the pink
+    node is shown as a green node.  If the answer is not what you
+    expected, hover over the pink node to see what other words are
+    close to it; the second or third closest word may be the correct
+    answer.<p/>
+
+  <li> <b> Examine the effects of vector arithmetic.</b> When solving
+    an analogy problem, the third and fifth vectors in the vector
+    display are the results of arithmetic operations.  The magnitudes
+    of these vectors are shown in blue.  The magnitudes of words are
+    always 1.0, but the artihmetic results can have magnitudes smaller
+    or larger than 1.0.<p/>
+
+</ul>
+
+<h5> Semantic Dimensions </h5>
+
+<ul>
+
+  <li> <b> Select a different semantic dimension.</b> Open the Custom
+    Semantic Dimensions panel and choose another dimension for the X
+    or Z axis.  (The Y axis is the residual and cannot be changed.)
+    See how the display changes.<p/>
+
+  <li> <b> Alter a semantic dimension.</b> Open one of the feature
+    subpanels and examine the word pairs used to define the feature.
+    You can change these pairs to alter the semantic dimension.  For
+    example, adding man/woman to the Gender dimension makes "gender"
+    less clear and diminishes the residual, because "man" has multiple
+    meanings.<p/>
+
+  <lI> <b> Define a new semantic dimension.</b> Pick a new semantic
+    dimension that you can define using pairs of opposed words.  For
+    example, you could define a "gerund" dimension with pairs such as
+    eat/eating, speak/speaking, play/playing, run/running, and
+    sleep/sleeping.  Then solve an analogy problem such as "eat is to
+    eating as swim is to x" and you'll see that the verb and gerund
+    forms are on opposite sides of the gerund dimension.<p/>
+
+</ul>
+
+<center>
+  Navigation: <a href="./index.html">Return to Demo</a> or <a href="tutorial.html">View Tutorial</a><p/>
+</center><p/>
+
+</body>
+</html>

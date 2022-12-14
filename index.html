@@ -1,0 +1,308 @@
+<!doctype html>
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <title>Word Embedding Demo</title>
+
+    <link rel="stylesheet" href="style.css" />
+    <script src="https://d3js.org/d3.v7.min.js"></script>
+    <script src="https://cdn.plot.ly/plotly-2.2.0.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/pako/2.0.3/pako.min.js"></script>
+    <script src="vector.js"></script>
+    <script src="wordembeddingdemo.js"></script>
+    <script src="libraries/leader-line/leader-line.min.js"></script>
+</head>
+
+<body>
+
+<div id="header">
+    <h1>Word Embedding Demo</h1>
+
+    <a href="tutorial.html">Tutorial</a>
+    <a href="experiments.html">Experiments</a>
+
+</div>
+
+<div id="loading-icon">
+    <img src="https://i.stack.imgur.com/kOnzy.gif" alt="loading-icon.gif"/>
+</div>
+<div id="loading-text"></div>
+
+<div id="plots-container">
+    <div id="plotly-scatter"> 
+        <div id="scatter-overlay"></div>
+    </div>
+    <div id="plotly-magnify"></div>
+    <div id="plotly-vector"> </div>
+</div>
+<div id="scatter-buttons">
+    <button id="clear-button" onclick="demo.clearWords()">Clear all</button>
+    <button id="scatter-button0" onclick="demo.selectFeature(0)">...</button>
+    <button id="scatter-button1" onclick="demo.selectFeature(1)">...</button>
+</div>
+
+<div id="plots-status-bar">
+    <form id="word-entry" action="javascript:demo.modifyWord()">
+        <input id="modify-word-input" type="text">
+        <button type="submit" autocomplete="off">Add/Remove Word</button>
+    </form>
+    <div id="modify-word-message"></div>
+</div>
+
+<!-- Vector analogies -->
+<details id="analogy-details">
+    <summary>Vector analogy arithmetic</summary>
+
+    <!-- autocomplete off to disable Firefox from saving form entries -->
+    <form id="analogy-form" action="javascript:demo.processAnalogy()" autocomplete="off">
+        <table id="analogy-table">
+			<tr>
+            	<th colspan = 6>English notation</th>
+            	<th style = text-align:center>Result</th>
+                <th></th>
+            </tr>
+            <tr>
+                <td><input id="analogy-word-a" type="text" onkeyup="demo.populateOther(event, 'analogy-word-a', 'analogy-word-a-mirror')" placeholder="man"></td>
+                <td>is to</td>
+                <td><input id="analogy-word-b" type="text" onkeyup="demo.populateOther(event, 'analogy-word-b', 'analogy-word-b-mirror')" placeholder="king"></td>
+                <td>as</td>
+                <td><input id="analogy-word-c" type="text" onkeyup="demo.populateOther(event, 'analogy-word-c', 'analogy-word-c-mirror')" placeholder="woman"></td>
+                <td>is to</td>
+                
+                <td><span id="analogy-message" type="text"></span>
+                    <output id="analogy-word-wstar" type="text" for="analogy-word-b analogy-word-a analogy-word-c">----</output>
+                    
+                </td>
+                <td><button id="analogy-button" type="submit">Submit</button></td>
+            </tr>
+		</table>
+
+        <table id="analogy-table">
+			<tr>
+            	<th colspan = 6>Vector notation</th>
+            	<th style = text-align:center>Result</th>
+                <th></th>
+            </tr>
+            <tr>
+                <td><input id="analogy-word-b-mirror" onkeyup="demo.populateOther(event, 'analogy-word-b-mirror', 'analogy-word-b')" type="text" placeholder="king"></td>
+                <td id="arith-symbol"> – </td>
+                <td><input id="analogy-word-a-mirror" onkeyup="demo.populateOther(event, 'analogy-word-a-mirror', 'analogy-word-a')" type="text" placeholder="man"></td>
+                <td id="arith-symbol"> + </td>
+                <td><input id="analogy-word-c-mirror" onkeyup="demo.populateOther(event, 'analogy-word-c-mirror', 'analogy-word-c')" type="text" placeholder="woman"></td>
+                <td id="arith-symbol"> = </td>
+                
+                <td><span id="analogy-message" type="text"></span>
+                    <output id="analogy-word-wstar-mirror" for="analogy-word-b analogy-word-a analogy-word-c">----</output>
+                    
+                </td>
+                <td><button id="analogy-button" type="submit">Submit</button></td>
+            </tr>
+		</table>
+    </form>
+
+</details>
+
+<!-- Custom user-defined semantic dimensions #29 -->
+<details id = "custom-details">
+    <summary>Custom semantic dimensions</summary>
+    <form id="user-features-form" action="javascript:demo.processFeatureInput()" autocomplete="off">
+    
+        <!-- feature option 0 -->
+        <details id=feature-details0>
+            <summary id="summary0">Feature Name
+                    <label>
+                        <input class="user-feature-name feature0" type="text">
+                    </label>
+                    <!-- dropdown -->
+                    <select class="dropdown" id="dropdown0" onchange= "demo.dropDownActions(id)">
+                        <option value="defaultValue">---</option>
+                        <option value="value1" selected>X - Axis</option>
+                        <option value="value2">Z - Axis</option>
+                    </select>
+                    <button class="button" id="feature-button0" type="submit">Submit</button>
+            </summary>
+                
+            <div class="user-feature-entry">
+                <textarea class="user-feature-words feature0 set0" rows="16"></textarea>
+                <textarea class="user-feature-words feature0 set1" rows="16"></textarea>
+            </div>
+        </details>
+        
+        <!-- feature option 1 -->
+        <details id='feature-details1'>
+            <summary id="summary1">Feature Name
+                    <label>
+                        <input class="user-feature-name feature1" type="text">
+                    </label>
+                    <!-- dropdown -->
+                    <select class="dropdown" id="dropdown1" onchange= "demo.dropDownActions(id)">
+                        <option value="defaultValue">---</option>
+                        <option value="value1">X - Axis</option>
+                        <option value="value2" selected>Z - Axis</option>
+                    </select>
+                <button class="button" id="feature-button1" type="submit">Submit</button>
+            </summary>
+            
+            <div class="user-feature-entry">
+                <textarea class="user-feature-words feature1 set0" rows="16"></textarea>
+                <textarea class="user-feature-words feature1 set1" rows="16"></textarea>
+            </div>
+        </details>
+            
+        <!-- feature option 2 -->
+        <details id=feature-details2>
+            <summary id="summary2">Feature Name
+                    <label>
+                        <input class="user-feature-name feature2" type="text">
+                    </label>
+                    <!-- dropdown -->
+                    <select class="dropdown" id="dropdown2" onchange= "demo.dropDownActions(id)">
+                        <option value="defaultValue">---</option>
+                        <option value="value1">X - Axis</option>
+                        <option value="value2">Z - Axis</option>
+                    </select>
+                <button class="button" id="feature-button2" type="submit">Submit</button>
+            </summary>
+            
+            <div class="user-feature-entry">
+                <textarea class="user-feature-words feature2 set0" rows="16"></textarea>
+                <textarea class="user-feature-words feature2 set1" rows="16"></textarea>
+            </div>
+        </details>
+                
+        <!-- feature option 3 -->
+        <details id=feature-details3>
+            <summary  id="summary3">Feature Name
+                    <label>
+                        <input class="user-feature-name feature3" type="text">
+                    </label>
+                    <!-- dropdown -->
+                    <select class="dropdown" id="dropdown3" onchange= "demo.dropDownActions(id)">
+                        <option value="defaultValue">---</option>
+                        <option value="value1">X - Axis</option>
+                        <option value="value2">Z - Axis</option>
+                    </select>
+                <button class="button" id="feature-button3" type="submit">Submit</button>
+            </summary>
+            
+            <div class="user-feature-entry">
+                <textarea class="user-feature-words feature3 set0" rows="16"></textarea>
+                <textarea class="user-feature-words feature3 set1" rows="16"></textarea>
+            </div>
+        </details>
+                
+        <!-- feature option 4 -->
+        <details id=feature-details4>
+            <summary  id="summary4">Feature Name
+                    <label>
+                        <input class="user-feature-name feature4" type="text">
+                    </label>
+                    <!-- dropdown -->
+                    <select class="dropdown" id="dropdown4" onchange= "demo.dropDownActions(id)">
+                        <option value="defaultValue">---</option>
+                        <option value="value1">X - Axis</option>
+                        <option value="value2">Z - Axis</option>
+                    </select>
+                <button class="button" id="feature-button4" type="submit">Submit</button>
+            </summary>
+            
+            <div class="user-feature-entry">
+                <textarea class="user-feature-words feature4 set0" rows="16"></textarea>
+                <textarea class="user-feature-words feature4 set1" rows="16"></textarea>
+            </div>
+        </details>
+
+        <!-- feature option 5 -->
+        <details id=feature-details5>
+            <summary  id="summary5">Feature Name
+                    <label>
+                        <input class="user-feature-name feature5" type="text">
+                    </label>
+                    <!-- dropdown -->
+                    <select class="dropdown" id="dropdown5" onchange= "demo.dropDownActions(id)">
+                        <option value="defaultValue">---</option>
+                        <option value="value1">X - Axis</option>
+                        <option value="value2">Z - Axis</option>
+                    </select>
+                <button class="button" id="feature-button5" type="submit">Submit</button>
+            </summary>
+            
+            <div class="user-feature-entry">
+                <textarea class="user-feature-words feature5 set0" rows="16"></textarea>
+                <textarea class="user-feature-words feature5 set1" rows="16"></textarea>
+            </div>
+        </details>
+
+        <!-- feature option 6 -->
+        <details id=feature-details6>
+            <summary  id="summary6">Feature Name
+                    <label>
+                        <input class="user-feature-name feature6" type="text">
+                    </label>
+                    <!-- dropdown -->
+                    <select class="dropdown" id="dropdown6" onchange= "demo.dropDownActions(id)">
+                        <option value="defaultValue">---</option>
+                        <option value="value1">X - Axis</option>
+                        <option value="value2">Z - Axis</option>
+                    </select>
+                <button class="button" id="feature-button6" type="submit">Submit</button>
+            </summary>
+            
+            <div class="user-feature-entry">
+                <textarea class="user-feature-words feature6 set0" rows="16"></textarea>
+                <textarea class="user-feature-words feature6 set1" rows="16"></textarea>
+            </div>
+        </details>
+
+        <!-- feature option 7 - blank option for user to fill in -->
+        <details id=feature-details7>
+            <summary  id="summary7">Feature Name
+                    <label>
+                        <input class="user-feature-name feature7" type="text" placeholder="enter dimension here">
+                    </label>
+                    <!-- dropdown -->
+                    <select class="dropdown" id="dropdown7" onchange= "demo.dropDownActions(id)">
+                        <option value="defaultValue">---</option>
+                        <option value="value1">X - Axis</option>
+                        <option value="value2">Z - Axis</option>
+                    </select>
+                <button class="button" id="feature-button7" type="submit">Submit</button>
+            </summary>
+            
+            <div class="user-feature-entry">
+                <textarea class="user-feature-words feature7 set0" rows="16"></textarea>
+                <textarea class="user-feature-words feature7 set1" rows="16"></textarea>
+            </div>
+        </details>
+
+        <!-- feature option 8 - blank option for user to fill in -->
+        <details id=feature-details8>
+            <summary  id="summary8">Feature Name
+                    <label>
+                        <input class="user-feature-name feature8" type="text" placeholder="enter dimension here">
+                    </label>
+                    <!-- dropdown -->
+                    <select class="dropdown" id="dropdown8" onchange= "demo.dropDownActions(id)">
+                        <option value="defaultValue">---</option>
+                        <option value="value1">X - Axis</option>
+                        <option value="value2">Z - Axis</option>
+                    </select>
+                <button class="button" id="feature-button8" type="submit">Submit</button>
+            </summary>
+            
+            <div class="user-feature-entry">
+                <textarea class="user-feature-words feature8 set0" rows="16"></textarea>
+                <textarea class="user-feature-words feature8 set1" rows="16"></textarea>
+            </div>
+        </details>
+        
+        
+        <div id="user-features-bar">
+            <span id="user-feature-message"></span>
+        </div>
+
+    </form>
+</details>
+
+</body>
+</html>

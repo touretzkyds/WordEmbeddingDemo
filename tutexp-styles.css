@@ -1,0 +1,67 @@
+ul.fixed {
+  padding-left: 30px;
+  margin-top: 10px;
+  margin-bottom: 15px;
+}
+
+ul.fixed li {
+  list-style-type: initial;
+}
+
+h5 { text-align: left; }
+
+.mytable {
+  table-layout: fixed;
+  margin-left: 10em;
+  width: auto;
+  border-collapse: collapse;
+  border: 3px solid purple;
+}
+
+tr.myred { color: red; }
+tr.mygreen { color: green; }
+.mytable tr td:nth-child(1) { color: initial }
+.mytable td { padding: 0 10px 0 10px; margin: 0; }
+.mytable td { text-align: right; }
+
+.mytable th { font-weight: bolder; text-align: center; }
+.mytable th[colspan]:not([colspan="1"]) { border: 0; padding: 0; }
+
+#distance td:nth-child(2) { text-align: left }
+
+.twofer {
+  table-layout: fixed;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  width: auto;
+}
+
+.twofer tr {
+  padding: 0 0 0 0;
+  margin: 0 0 0 0;
+  border: 0 0 0 0;
+}
+
+.my_embedding_dict {
+  table-layout: fixed;
+  margin-left: 5em;
+  width: auto;
+  border-collapse: collapse;
+  border: 3px solid purple;
+}
+
+.my_embedding_dict tr {
+    border: 1px solid black;
+    padding: 0;
+}
+
+.my_embedding_dict td {
+    border: 1px solid black;
+    padding: 5px 7px 0 7px;
+}
+
+.my_embedding_dict td:nth-child(1) { text-align: right; font-weight: bolder; }
+
+img.indented { margin-left: 10em; }
+

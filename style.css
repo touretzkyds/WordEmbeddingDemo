@@ -1,0 +1,219 @@
+body {
+    /* match Plotly defaults */
+    font-family: 'Open Sans', Verdana, Arial, sans-serif;
+}
+
+#header {
+    margin: 50px 50px 30px;
+}
+
+#header h1 {
+    display: inline-block;
+    font-size: 3em;
+    margin: auto 50px;
+}
+
+#header a {
+    display: inline-block;
+    margin: auto 20px;
+    font-weight: bold;
+}
+
+/* other attributes:  */
+
+#analogy-table {
+    border-collapse: collapse;
+    width: 90%;
+    margin-left: 3%;
+}
+
+#analogy-table td, #analogy-table th {
+    border: 1px solid #ddd;
+    padding: 8px;
+}
+
+#analogy-table tr:nth-child(even){background-color: #f2f2f2;}
+
+#analogy-table td:nth-child(even){
+    width: 6%;
+    text-align: center;
+}
+
+#analogy-table td:nth-child(odd){
+    width: 20%;
+    text-align: center;
+}
+
+#analogy-table tr:hover {background-color: #ddd;}
+
+#analogy-table th {
+    padding-top: 8px;
+    padding-bottom: 8px;
+    text-align: left;
+}
+
+#analogy-button {
+    padding: 7px 10px;
+    border-radius: 4px;
+}
+
+[id^="analogy-word"]{
+    padding: 5px;
+    font-size: 15px;
+    width: 80%;
+    color: blue;
+}
+
+[id^="analogy-word-wstar"]{
+    color: darkgreen;
+}
+
+#arith-symbol {
+    color: #ff7171;
+    font-weight: bold;
+}
+
+
+
+.button {
+    height: 20px;
+    width: 100px;
+    display: inline-flex;
+}
+
+.dropdown {
+    height: 20px;
+    width: 100px; 
+    color:blue;
+    display: inline-block;
+
+}
+
+#loading-text {
+    text-align: center;
+    margin-bottom: 10px;
+}
+
+#loading-icon {
+    display: flex;
+    justify-content: center;
+    overflow: auto;
+    height: 100px;
+}
+
+#plots-container {
+    height: 70vh;
+    width: 98vw;
+    display: flex;
+}
+
+#scatter-buttons {
+    margin: 5px auto 5px 5px;
+}
+
+#plotly-magnify {
+    width: 10%;
+    max-width: 100px;
+}
+
+#plotly-vector {
+    width: 50%;
+}
+
+#plotly-scatter {
+    width: 45%;
+    position: relative;
+}
+
+#scatter-overlay {
+    position: absolute;
+    z-index: 1000; /* bring to front */
+}
+
+#plots-status-bar {
+    display: flex;
+}
+
+#word-entry {
+    flex: 1;
+}
+
+#modify-word-message {
+    flex: 1;
+}
+
+#modify-word-input {
+    width: 50%
+}
+
+/* bind vector axis click */
+.yaxislayer-above {
+    cursor: pointer;
+    pointer-events: all;
+}
+
+details {
+    margin: 10px auto;
+}
+
+details > form {
+    margin: 10px auto;
+}
+
+output {
+    display: inline-block;
+    width: 15em;
+}
+
+#user-features-form {
+    display: inline-flex;
+    flex-direction: column;
+    margin-left: 3%;
+}
+
+.user-features-container {
+    display: flex;
+    flex-direction: row;
+    width: 100%;
+}
+
+.user-feature-container {
+    flex: 1;
+    display: flex;
+    flex-direction: row;
+}
+
+.user-feature-entry {
+    display: flex;
+    height: 175px;
+    margin: 5px;
+}
+
+.user-feature-entry textarea {
+    flex: 1;
+    margin: 5px;
+}
+
+#user-feature-message {
+    margin-left: 10%;  /* good size? */
+}
+
+@keyframes blinker {
+  0% {
+    fill: red;
+  }
+  50% {
+    opacity: 0;
+    fill: red;
+  }
+  100% {
+    fill: red;
+  }
+}
+
+#analogy-loading-icon {
+    display: flex;
+    justify-content: center;
+    height: 20px;
+    border: 2px solid green;
+}
