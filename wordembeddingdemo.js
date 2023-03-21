@@ -397,6 +397,9 @@ class Demo {
                     this.plotScatter();
                     this.plotVector();
                 }
+                // reset leader lines
+                this.removeSimilarityLines();
+                this.initSimilarityLines();
             });
     }
 
@@ -873,6 +876,7 @@ class Demo {
             this.plotVector();
             this.plotMagnify();
             // also turn off similarity lines (#55)
+            this.removeSimilarityLines();
             this.initSimilarityLines();
     }
 
@@ -952,9 +956,7 @@ class Demo {
         this.similarityLines = [];
         // select vectorwords 
         const yTicks = document.querySelectorAll("#plotly-vector > div > div > svg:nth-child(1) > g.cartesianlayer > g > g.yaxislayer-above > g");
-        const pointAnchor = document.getElementById("scatter-overlay")
-        const similarityValues = this.plotMagnifyTickText;
-        const selectedWord = this.selectedWord;
+        const pointAnchor = document.getElementById("scatter-overlay");
         yTicks.forEach((elem, idx) => {
             this.similarityLines.push(
                 new LeaderLine(
@@ -965,7 +967,7 @@ class Demo {
                         color: 'red',
                         dash: true,
                         size: 0.5,
-                        hide: true   
+                        hide: true,
                     }
                 )
             );
@@ -975,7 +977,6 @@ class Demo {
     // toggle visibility of similarity lines on click (#55)
     updateSimilarityLines(reposition, visible) {
         const similarityValues = this.plotMagnifyTickText;
-        const selectedWord = this.selectedWord;
         // update line captions
         this.similarityLines.forEach((line, idx) => {
             const options = {
@@ -985,21 +986,28 @@ class Demo {
         });
         if (reposition) {
             // move lines to updated position
-            this.similarityLines.forEach((line, idx) => {
+            this.similarityLines.forEach((line) => {
                 line.position();
             });
         }
         // show or hide lines
         if (visible) {
-            this.similarityLines.forEach((line, idx) => {
+            this.similarityLines.forEach((line) => {
                 // TODO: add if clause for [empty] slots
                 line.show();
             });
         } else {
-            this.similarityLines.forEach((line, idx) => {
+            this.similarityLines.forEach((line) => {
                 line.hide();
             });
         }
+    }
+
+    // remove all lines to prevent disconnected element error 
+    removeSimilarityLines() {
+        this.similarityLines.forEach((line) => {
+            line.remove();
+        });
     }
 
     // detect if erase is required, ie. we have arithmetic results instead of pure words in vector plot (#35)
@@ -1116,7 +1124,7 @@ class Demo {
         // hide all lines on mouse down (#53)
         // TODO: hide when zooming
         plotly_scatter.addEventListener("mousedown", () => {
-            this.updateSimilarityLines(false, false);
+            this.updateSimilarityLines(true, false);
         });
 
         // make overlay clickable for hovertext (#50)
@@ -1132,8 +1140,6 @@ document.addEventListener("DOMContentLoaded", () => {
 
 // resize all plots on window resize (#52)
 window.addEventListener('resize', function() {
-    // prevents error in leaderlines on window resize
-    demo.updateSimilarityLines(false, false); 
     const plotsToResize = ["plotly-scatter", "plotly-vector", "plotly-magnify"];
     plotsToResize.forEach(id => {
         const container = document.getElementById(id);
@@ -1143,5 +1149,7 @@ window.addEventListener('resize', function() {
         };
         Plotly.relayout(id, updatedDims);
     });
-    demo.initSimilarityLines(); // reset leader lines
+    // reset leader lines
+    demo.removeSimilarityLines(); 
+    demo.initSimilarityLines();
 });
