@@ -93,6 +93,9 @@ class Demo {
 
         // default settings for magnify plot vector display numbers (#36)
         this.formatMagnitudePlot("default")
+
+        // create placeholder for similarity lines
+        this.similarityLines = [];
     }
 
     // read raw model text and write vectors to vecs and vocab
@@ -717,6 +720,9 @@ class Demo {
         // set analogy words to display in scatter (#12):
         this.analogy = {"b": wordB, "a": wordA, "c": wordC, "y": wordY, "Wstar": wordWstar};
 
+        // remove similarity lines to prevent disconnected elements in leader lines
+        this.removeSimilarityLines();
+
         this.plotScatter();
 
         // write arithmetic vectors to vector view (#14)
@@ -898,17 +904,21 @@ class Demo {
         if (hovering) {
             // move overlay to hovertext
             // get bounding region to overlay on
-            const rectTop = document.querySelector("#scene > svg > g > text > tspan:nth-child(5)").getBoundingClientRect();
-            const rectParent = document.getElementById("plotly-scatter").getBoundingClientRect();
-            this.moveElem(overlay, 
-                rectTop.left - rectParent.left - 5, // 5px margin on left
-                rectTop.top - rectParent.top,
-                );
-            // increase size of overlay
-            this.resizeElem(overlay,
-                1.15*(rectTop.width), // 15% margin on right
-                3.5*(rectTop.height) // empirical height based on limits of hovertext popping up
-                );
+            const topElem = document.querySelector("#scene > svg > g > text > tspan:nth-child(5)");
+            const parentElem = document.getElementById("plotly-scatter");
+            if (topElem !== null) {
+                const rectTop = topElem.getBoundingClientRect();
+                const rectParent = parentElem.getBoundingClientRect();
+                this.moveElem(overlay, 
+                    rectTop.left - rectParent.left - 5, // 5px margin on left
+                    rectTop.top - rectParent.top,
+                    );
+                // increase size of overlay
+                this.resizeElem(overlay,
+                    1.15*(rectTop.width), // 15% margin on right
+                    3.5*(rectTop.height) // empirical height based on limits of hovertext popping up
+                    );
+            }
             // enable clicks
             overlay.style.pointerEvents = "auto";
         } else {
@@ -953,7 +963,6 @@ class Demo {
 
     // draw lines between selected word in scatter plot and highlighted similarity words in vector plot (#55)
     initSimilarityLines() {
-        this.similarityLines = [];
         // select vectorwords 
         const yTicks = document.querySelectorAll("#plotly-vector > div > div > svg:nth-child(1) > g.cartesianlayer > g > g.yaxislayer-above > g");
         const pointAnchor = document.getElementById("scatter-overlay");
@@ -1008,6 +1017,7 @@ class Demo {
         this.similarityLines.forEach((line) => {
             line.remove();
         });
+        this.similarityLines = [];
     }
 
     // detect if erase is required, ie. we have arithmetic results instead of pure words in vector plot (#35)
