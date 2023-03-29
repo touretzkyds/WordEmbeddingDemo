@@ -486,7 +486,7 @@ class Demo {
             this.vecs.get(word).slice(lo, hi + 1));
 
         // set axis labels as z if it is null
-        this.plotMagnifyTickText = this.plotMagnifyTickText || z.map(row => 
+        this.similarityValues = this.similarityValues || z.map(row => 
             row.map(value => 
                 ' ' + String(value.toFixed(2)))); // round off and prefix blank to distance from heatmap 
         
@@ -545,7 +545,7 @@ class Demo {
                     standoff: 40},
                 side: "left",
                 tickvals: d3.range(this.vectorWords.length),
-                ticktext: this.plotMagnifyTickText,
+                ticktext: this.similarityValues,
                 ticks: "", // hide ticks (#49)
                 showticklabels: this.plotMagnifyShowTicks,
                 fixedrange: true,
@@ -575,7 +575,7 @@ class Demo {
             Plotly.react("plotly-magnify", data, layout);
         }
 
-        // hide plotly magnify in selection mode
+        // hide plotly magnify in similarity mode
         document.querySelector("#plotly-magnify > div > div > svg:nth-child(1) > g.cartesianlayer").style.visibility = this.hideMagnitudePlot ? 'hidden' : '';     
     }
 
@@ -629,7 +629,7 @@ class Demo {
         if (finalWordsToAdd.size > 0){
             for (var word of finalWordsToAdd) // go up to last word of set
             this.selectedWord = word; // select last word
-            this.formatMagnitudePlot("selection");
+            this.formatMagnitudePlot("similarity");
             this.highlightVectorAxis(true);
         }
         else {
@@ -860,7 +860,6 @@ class Demo {
 
     // switch "vector arithmetic mode" (#22)
     handleAnalogyToggle(element) {
-        this.updateSimilarityLines(true, false); // move and hide lines
         // deselect word if user enters vector arithmetic mode (#37)
         this.selectedWord = ""; 
         // also turn off highlight prompt for vector plot if user enters vector arithmetic mode (#37)
@@ -951,7 +950,7 @@ class Demo {
         } else { // select
             this.highlightVectorAxis(true); // turn on highlight prompt for vector plot
             this.selectedWord = clickedWord;
-            this.formatMagnitudePlot("selection");
+            this.formatMagnitudePlot("similarity");
             this.updateSimilarityLines(true, true); // move and show lines
         }
 
@@ -963,14 +962,15 @@ class Demo {
 
     // draw lines between selected word in scatter plot and highlighted similarity words in vector plot (#55)
     initSimilarityLines() {
+        this.similarityLines = [];
         // select vectorwords 
         const yTicks = document.querySelectorAll("#plotly-vector > div > div > svg:nth-child(1) > g.cartesianlayer > g > g.yaxislayer-above > g");
         const pointAnchor = document.getElementById("scatter-overlay");
-        yTicks.forEach((elem, idx) => {
+        yTicks.forEach((yTick, idx) => {
             this.similarityLines.push(
                 new LeaderLine(
                     LeaderLine.pointAnchor(pointAnchor, {x: '0%', y: '80%'}), // height % based on fact that scatter overlay is asymmetric
-                    elem,
+                    yTick,
                     {
                         path: 'magnet',
                         color: 'red',
@@ -985,11 +985,10 @@ class Demo {
 
     // toggle visibility of similarity lines on click (#55)
     updateSimilarityLines(reposition, visible) {
-        const similarityValues = this.plotMagnifyTickText;
         // update line captions
         this.similarityLines.forEach((line, idx) => {
             const options = {
-                middleLabel: LeaderLine.pathLabel(`${similarityValues[idx]}`),
+                middleLabel: LeaderLine.pathLabel(`${this.similarityValues[idx]}`),
             };
             line.setOptions(options);
         });
@@ -1001,9 +1000,11 @@ class Demo {
         }
         // show or hide lines
         if (visible) {
-            this.similarityLines.forEach((line) => {
+            this.similarityLines.forEach((line, idx) => {
                 // TODO: add if clause for [empty] slots
-                line.show();
+                if (this.vectorWords[idx] !== "[empty]") {
+                    line.show();
+                }
             });
         } else {
             this.similarityLines.forEach((line) => {
@@ -1029,11 +1030,14 @@ class Demo {
     // prompt user for copying word into vector plot (#31)
     highlightVectorAxis(active) { 
         // select y ticks of vector plot to highlight
+        this.fun = [];
         const yTicks = document.querySelectorAll("#plotly-vector > div > div > svg:nth-child(1) > g.cartesianlayer > g > g.yaxislayer-above > g");
         if (active) {
             // draw red rectangles around text as prompt
             yTicks.forEach((elem) => {
-                elem.style.setProperty("outline", "2px solid red");
+                if (elem.__data__.text !== "[empty]") {
+                    elem.style.setProperty("outline", "2px solid red");
+                }
             });
         }
         else {
@@ -1044,12 +1048,16 @@ class Demo {
         }
     }
 
+    computeSimilarityValues() {
+        return;
+    }
+
     // hide or show magnitude numbers for vector magnitude plot depending on mode (#36) 
     formatMagnitudePlot(mode="default") {
-        if (mode === "selection") {
-            const selectedVector = this.vecs.get(this.selectedWord);
+        if (mode === "similarity") {
+            const selectedVector = this.vecs.get(this.selectedWord).unit();
             this.plotMagnifyTitle = "Similarity to "+`'${this.selectedWord}'`;
-            this.plotMagnifyTickText = this.vectorWords.map(word => this.vecs.get(word).dot(selectedVector).toFixed(2));
+            this.similarityValues = this.vectorWords.map(word => this.vecs.get(word).unit().dot(selectedVector).toFixed(2));
             this.plotMagnifyShowTicks = true; 
             this.plotMagnifyColor = "red";    
             // hide magnitude plot when similarity mode active
@@ -1057,7 +1065,7 @@ class Demo {
         }
         else if (mode === "arithmetic") {
             this.plotMagnifyTitle = "Magnitude";
-            this.plotMagnifyTickText = this.vectorWords.map(word => this.vecs.get(word).norm().toFixed(2));
+            this.similarityValues = this.vectorWords.map(word => this.vecs.get(word).norm().toFixed(2));
             this.plotMagnifyShowTicks = true;        
             this.plotMagnifyColor = "blue";  
             // show magnitude plot
@@ -1065,7 +1073,7 @@ class Demo {
         }
         else {
             this.plotMagnifyTitle = "";
-            this.plotMagnifyTickText = "";
+            this.similarityValues = "";
             this.plotMagnifyShowTicks = false;        
             this.plotMagnifyColor = "black";       
             // show magnitude plot
