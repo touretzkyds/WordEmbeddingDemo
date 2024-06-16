@@ -48,8 +48,8 @@ class Demo {
         // lists of word pairs to be used for creating features
         this.featureWordsPairs = [
             [
-                ["prince",  "husband", "father", "son",     "uncle", "nephew", "boy",  "male", "his"],
-                ["princess", "wife",   "mother", "daughter", "aunt", "niece", "girl", "female", "her"]
+                ["king", "prince",  "husband", "father", "son",     "uncle", "nephew", "boy",  "male", "his"],
+                ["queen", "princess", "wife",   "mother", "daughter", "aunt", "niece", "girl", "female", "her"]
             ],
             [
                 ["man", "woman", "king",  "queen",   "father", "mother",  "uncle",   "aunt"],
