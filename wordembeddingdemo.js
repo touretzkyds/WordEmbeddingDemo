@@ -771,7 +771,8 @@ class Demo {
                 // split words across new lines
                 // convert to lowercase (#39)
                 featureWordsPairsInput[i][j] =
-                    document.querySelector(`.user-feature-words.${selectedNames[i]}.set${j}`).value.toLowerCase().split('\n');
+                    // filter out empty strings and convert to lowercase
+                    document.querySelector(`.user-feature-words.${selectedNames[i]}.set${j}`).value.split(/\r?\n/).map((word) => word.trim().toLowerCase()).filter(Boolean);
             }
         }
 
