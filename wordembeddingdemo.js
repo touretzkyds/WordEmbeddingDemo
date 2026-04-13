@@ -762,6 +762,10 @@ class Demo {
 
     // handle user submitting feature words into form
     processFeatureInput() {
+        // clear legacy bottom message and inline row messages
+        document.getElementById("user-feature-message").innerText = "";
+        this.clearFeatureInlineMessages();
+
         // console.log(`this.idx0 = ${this.idx0}, this.idx1 = ${this.idx1}`)
         let selectedNames = [`feature${this.idx0}`, `feature${this.idx1}`]; //.user-feature-words.
         // temporary input to be validated
@@ -779,8 +783,8 @@ class Demo {
         // ensure feature sets are the same length
         for (let i=0; i<2; i++) {
             if (featureWordsPairsInput[i][0].length !== featureWordsPairsInput[i][1].length) {
-                document.getElementById("user-feature-message").innerText =
-                    "Ensure feature word sets are same length";
+                const featureIdx = Number(selectedNames[i].replace("feature", ""));
+                this.setFeatureInlineMessage(featureIdx, "Ensure feature word sets are same length");
                 return;
             }
         }
@@ -790,8 +794,8 @@ class Demo {
             for (let j=0; j<2; j++) {
                 for (const word of featureWordsPairsInput[i][j]) {
                     if (!this.vocab.has(word)) {
-                        document.getElementById("user-feature-message").innerText =
-                            `"${word}" not found`;
+                        const featureIdx = Number(selectedNames[i].replace("feature", ""));
+                        this.setFeatureInlineMessage(featureIdx, `"${word}" not found`);
                         return;
                     }
                 }
@@ -810,6 +814,24 @@ class Demo {
         document.getElementById("scatter-button1").innerText = this.featureNames[1];
 
         this.plotScatter();
+    }
+
+    // clear all semantic dimension row messages before revalidation
+    clearFeatureInlineMessages() {
+        document.querySelectorAll(".user-feature-inline-message")
+            .forEach(elem => elem.remove());
+    }
+
+    // attach an inline message next to a feature row's submit button
+    setFeatureInlineMessage(featureIdx, message) {
+        const summary = document.querySelector(`#feature-details${featureIdx} summary`);
+        if (!summary) {
+            return;
+        }
+        const msg = document.createElement("span");
+        msg.className = "user-feature-inline-message";
+        msg.innerText = message;
+        summary.appendChild(msg);
     }
 
     // populate other box if one box is filled (#28)

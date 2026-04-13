@@ -171,6 +171,10 @@ output {
     margin-left: 3%;
 }
 
+#user-features-form details > summary {
+    position: relative;
+}
+
 .user-features-container {
     display: flex;
     flex-direction: row;
@@ -196,6 +200,14 @@ output {
 
 #user-feature-message {
     margin-left: 10%;  /* good size? */
+}
+
+.user-feature-inline-message {
+    position: absolute;
+    margin-left: 10px;  /* good looking? */
+    /* color: #d11a2a;
+    font-weight: 600; */
+    white-space: nowrap;
 }
 
 @keyframes blinker {
