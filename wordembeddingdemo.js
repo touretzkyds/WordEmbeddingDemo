@@ -579,9 +579,9 @@ class Demo {
         document.querySelector("#plotly-magnify > div > div > svg:nth-child(1) > g.cartesianlayer").style.visibility = this.hideMagnitudePlot ? 'hidden' : '';     
     }
 
-    // remove all non alphanumeric characters from words (#56)
+    // lowercase and remove non alphanumeric characters from words (#56)
     cleanWordInput(word) {
-        word = word.replace(/\W/g, '');
+        word = word.trim().toLowerCase().replace(/\W/g, '');
         return word;
     }
 
