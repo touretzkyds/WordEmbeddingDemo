@@ -591,7 +591,6 @@ class Demo {
         let addedWords = [];
         let removedWords = [];
         let absentWords = [];
-        let finalWordsToAdd = new Set(); // handle duplicate additions for word selection / display at the end of this function
         // split user input across periods, spaces, commas or semicolons
         const words = document.getElementById("modify-word-input").value
                               .split(/[ ;,.]+/); 
@@ -609,13 +608,11 @@ class Demo {
             if (this.scatterWords.includes(word)) {  // remove word
                 this.scatterWords = this.scatterWords.filter(item => item !== word);
                 removedWords.push(word);
-                if (finalWordsToAdd.has(word)) finalWordsToAdd.delete(word);
                 wordModified = true;
             } else { // add word if in vocab
                 if (this.vocab.has(word)) {
                     this.scatterWords.push(word);
                     addedWords.push(word);
-                    finalWordsToAdd.add(word);
                     wordModified = true;
                 } else { // word not found
                     absentWords.push(word);
@@ -624,18 +621,21 @@ class Demo {
             }
         });
 
-        // make first added word active
-        // if no words have been added, deactivate any currently active word
-        if (finalWordsToAdd.size > 0){
-            for (var word of finalWordsToAdd) // go up to last word of set
-            this.selectedWord = word; // select last word
-            this.formatMagnitudePlot("similarity");
-            this.highlightVectorAxis(true);
-        }
-        else {
+        // if word added/removed, clear selection and similarity redlines (switch to default mode)
+        if (wordModified) {
             this.selectedWord = "";
             this.formatMagnitudePlot("default");
             this.highlightVectorAxis(false);
+            this.updateSimilarityLines(true, false);
+        } else {
+            // keep current status unchanged when NO VALID word added/removed
+            if (this.selectedWord) {
+                this.formatMagnitudePlot("similarity");
+                this.highlightVectorAxis(true);
+            } else {
+                this.formatMagnitudePlot("default");
+                this.highlightVectorAxis(false);
+            }
         }
 
         // generate message as per changes to words
