@@ -1057,16 +1057,29 @@ class Demo {
         const selectedName = `feature${featureIdx}`;
         let featureWordsPairInput = Array(2);
         for (let j=0; j<2; j++) {
-            // split words across new lines
-            // convert to lowercase (#39)
-            featureWordsPairInput[j] =
-                document.querySelector(`.user-feature-words.${selectedName}.set${j}`).value.toLowerCase().split('\n');
+            // split words across new lines and normalize case/whitespace
+            // strip only trailing blank lines so interior blanks can still be validated
+            const lines = document.querySelector(`.user-feature-words.${selectedName}.set${j}`).value
+                .toLowerCase()
+                .split('\n')
+                .map(word => word.trim());
+
+            while (lines.length > 0 && lines[lines.length - 1] === "") {
+                lines.pop();
+            }
+            featureWordsPairInput[j] = lines;
         }
         return featureWordsPairInput;
     }
 
     // validate one feature row and write message on failure
     validateFeatureInput(featureIdx, featureWordsPairInput) {
+        // detect totally blank row before other validation messages
+        if (featureWordsPairInput[0].length === 0 && featureWordsPairInput[1].length === 0) {
+            this.setFeatureInlineMessage(featureIdx, "Text boxes are empty");
+            return false;
+        }
+
         // ensure feature sets are the same length
         if (featureWordsPairInput[0].length !== featureWordsPairInput[1].length) {
             this.setFeatureInlineMessage(featureIdx, "Ensure feature word sets are same length");
