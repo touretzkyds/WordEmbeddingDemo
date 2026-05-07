@@ -8,12 +8,35 @@ class Demo {
         this.HEATMAP_MAX = 0.2;
         this.VECTOR_DISPLAY_SIZE = 6;
         this.EMPTY_FEATURE_NAME = "[empty]";
+        this.MODEL_DIMENSION_FALLBACK = 300;
+
+        this.embeddingSources = {
+            "wordvecs50k": {
+                label: "wordvecs50k",
+                vectorsUrl: "wordvecs50k.vec.gz",
+                nearestWordsUrl: "nearest_words.txt",
+                compressed: true,
+                available: true
+            },
+            "glove6b300d": {
+                label: "glove.6B.300d",
+                vectorsUrl: "glove.6B.300d.vec.gz",
+                nearestWordsUrl: "nearest_words_glove.6B.300d.txt",
+                compressed: true,
+                available: true
+            }
+        };
+        this.activeSourceId = "wordvecs50k";
+        this.modelReady = false;
+        this.isLoadingSource = false;
+        this.listenersBound = false;
 
         // words involved in the computation of analogy (#12)
         this.analogy = {};  // default empty Object
         
         // words to show in vector display
-        this.vectorWords = ["queen", "king", "girl", "boy", "woman", "man"];
+        this.defaultVectorWords = ["queen", "king", "girl", "boy", "woman", "man"];
+        this.vectorWords = this.defaultVectorWords.slice();
         
         // empty words array for checking if vector words are empty (#35)
         this.emptyVector = new Array(this.VECTOR_DISPLAY_SIZE).fill(this.EMPTY_FEATURE_NAME);
@@ -35,18 +58,20 @@ class Demo {
 
         // words plotted on scatter plot
         // changes from original demo: replace "refrigerator" with "chair" and "computer"
-        this.scatterWords = ['man', 'woman', 'boy', 'girl', 'king', 'queen', 'prince', 'princess', 'nephew', 'niece',
+        this.defaultScatterWords = ['man', 'woman', 'boy', 'girl', 'king', 'queen', 'prince', 'princess', 'nephew', 'niece',
             'uncle', 'aunt', 'father', 'mother', 'son', 'daughter', 'husband', 'wife', 'chair', 'computer'];
+        this.scatterWords = this.defaultScatterWords.slice();
 
         // vector calculations and plotting, including residual (issue #3)
         // features 0 and 1 are user defined, feature 2 is residual
         this.features = Array(3); // init Array length doesn't actually matter
 
         // user-supplied names of features 0 and 1
-        this.featureNames = ["[gender]", "[age]", "[royalty]", "[number]", "[part-of]", "[tense]", "[capital]", "[]", "[]"]; // leave room for two user-defined semantic dimensions (#29)
+        this.defaultFeatureNames = ["[gender]", "[age]", "[royalty]", "[number]", "[part-of]", "[tense]", "[capital]", "[]", "[]"]; // leave room for two user-defined semantic dimensions (#29)
+        this.featureNames = this.defaultFeatureNames.slice();
 
         // lists of word pairs to be used for creating features
-        this.featureWordsPairs = [
+        this.defaultFeatureWordsPairs = [
             [
                 ["king", "prince",  "husband", "father", "son",     "uncle", "nephew", "boy",  "male", "his"],
                 ["queen", "princess", "wife",   "mother", "daughter", "aunt", "niece", "girl", "female", "her"]
@@ -85,6 +110,7 @@ class Demo {
                 []
             ]
         ];
+        this.featureWordsPairs = this.cloneFeatureWordsPairs(this.defaultFeatureWordsPairs);
 
         // default feature names (#29)
         this.idx0 = 0;
@@ -98,40 +124,249 @@ class Demo {
         this.similarityLines = [];
     }
 
-    // read raw model text and write vectors to vecs and vocab
-    processRawVecs(text) {
+    cloneFeatureWordsPairs(featureWordsPairs) {
+        return featureWordsPairs.map(featurePair =>
+            featurePair.map(wordList => wordList.slice())
+        );
+    }
+
+    getEmptyVector() {
+        const dim = this.vecsDim || this.MODEL_DIMENSION_FALLBACK;
+        return new Vector(new Array(dim).fill(0));
+    }
+
+    setSourceStatus(message, isError = false) {
+        const sourceStatus = document.getElementById("embedding-source-status");
+        if (!sourceStatus) {
+            return;
+        }
+        sourceStatus.innerText = message;
+        sourceStatus.style.color = isError ? "darkred" : "darkgreen";
+    }
+
+    markModelUnavailable(message) {
+        this.modelReady = false;
+        this.setSourceStatus(message, true);
+    }
+
+    guardModelReady(message = "Model is not ready yet.") {
+        if (!this.modelReady) {
+            this.setSourceStatus(message, true);
+            return false;
+        }
+        return true;
+    }
+
+    parseRawVecs(text) {
+        const vecs = new Map();
+        const vocab = new Set();
+        let vecsDim = 0;
+
         const lines = text.trim().split(/\n/);
         for (const line of lines) {
-            const entries = line.trim().split(' ');
-            this.vecsDim = entries.length - 1;
+            const entries = line.trim().split(/\s+/);
+            if (entries.length < 2) {
+                continue;
+            }
             const word = entries[0];
-            const vec = new Vector(entries.slice(1).map(Number)).unit();  // normalize word vectors
-            this.vocab.add(word);
-            this.vecs.set(word, vec);
+            const rawVec = entries.slice(1).map(Number);
+            if (rawVec.some(value => Number.isNaN(value))) {
+                throw new Error(`Invalid vector row for "${word}"`);
+            }
+            vecsDim = rawVec.length;
+            const vec = new Vector(rawVec).unit();
+            vocab.add(word);
+            vecs.set(word, vec);
         }
+
+        if (vecs.size === 0 || vecsDim === 0) {
+            throw new Error("No vectors were parsed.");
+        }
+
+        return {vecs, vocab, vecsDim};
+    }
+
+    parseNearestWords(text) {
+        const nearestWords = new Map();
+        const lines = text.trim().split(/\n/);
+        for (const line of lines) {
+            const entries = line.trim().split(/\s+/);
+            if (entries.length === 0) {
+                continue;
+            }
+            const target = entries[0];
+            const words = entries.slice(1);
+            nearestWords.set(target, words);
+        }
+        return nearestWords;
+    }
+
+    sanitizeFeatureWordsByVocab() {
+        this.featureWordsPairs = this.featureWordsPairs.map(featurePair => {
+            const [wordList0, wordList1] = featurePair;
+            const filtered0 = [];
+            const filtered1 = [];
+            const maxLen = Math.min(wordList0.length, wordList1.length);
+            for (let i = 0; i < maxLen; i++) {
+                const word0 = wordList0[i];
+                const word1 = wordList1[i];
+                if (this.vocab.has(word0) && this.vocab.has(word1)) {
+                    filtered0.push(word0);
+                    filtered1.push(word1);
+                }
+            }
+            return [filtered0, filtered1];
+        });
+    }
+
+    resetDropdownAxes() {
+        for (let i = 0; i <= 8; i++) {
+            const dropdown = document.getElementById(`dropdown${i}`);
+            if (!dropdown) {
+                continue;
+            }
+            if (i === 0) {
+                dropdown.value = "value1";
+            } else if (i === 1) {
+                dropdown.value = "value2";
+            } else {
+                dropdown.value = "defaultValue";
+            }
+        }
+    }
+
+    resetStateForSource() {
+        this.analogy = {};
+        this.selectedWord = "";
+        this.dataScatter = null;
+        this.plotWords = [];
+        this.hoverX = 0;
+
+        this.idx0 = 0;
+        this.idx1 = 1;
+
+        this.featureNames = this.defaultFeatureNames.slice();
+        this.selectedFeatureNames = [this.featureNames[this.idx0], this.featureNames[this.idx1]];
+        this.featureWordsPairs = this.cloneFeatureWordsPairs(this.defaultFeatureWordsPairs);
+        this.sanitizeFeatureWordsByVocab();
+
+        this.scatterWords = this.defaultScatterWords.filter(word => this.vocab.has(word));
+        this.vectorWords = this.defaultVectorWords.map(word =>
+            this.vocab.has(word) ? word : this.EMPTY_FEATURE_NAME
+        );
+
+        this.formatMagnitudePlot("default");
+    }
+
+    applyLoadedSource(sourceId, modelState, nearestWords) {
+        this.vecs = modelState.vecs;
+        this.vocab = modelState.vocab;
+        this.vecsDim = modelState.vecsDim;
+        this.nearestWords = nearestWords;
+        this.modelReady = true;
+
+        this.resetStateForSource();
+
+        this.vecs.set(this.EMPTY_FEATURE_NAME, this.getEmptyVector());
+
+        this.fillDimensionDefault();
+        this.resetDropdownAxes();
+        this.plotScatter(true);
+        this.plotVector(true);
+        this.processFeatureInput();
+
+        this.removeSimilarityLines();
+        this.initSimilarityLines();
+
+        this.highlightVectorAxis(false);
+        this.activeSourceId = sourceId;
+    }
+
+    bindPersistentListeners() {
+        if (this.listenersBound) {
+            return;
+        }
+
+        const analogyDetails = document.getElementById("analogy-details");
+        analogyDetails.ontoggle = () => this.handleAnalogyToggle(analogyDetails);
+
+        const plotly_scatter = document.getElementById("plotly-scatter");
+        plotly_scatter.addEventListener("mouseup", () => {
+            if (!this.modelReady) {
+                return;
+            }
+            this.plotScatter();
+        });
+
+        plotly_scatter.addEventListener("mousedown", () => {
+            if (!this.modelReady) {
+                return;
+            }
+            this.updateSimilarityLines(true, false);
+        });
+
+        this.addOverlayListener();
+
+        const sourceSelect = document.getElementById("embedding-source-select");
+        sourceSelect.addEventListener("change", (event) => {
+            this.onEmbeddingSourceChange(event);
+        });
+
+        this.listenersBound = true;
+    }
+
+    async onEmbeddingSourceChange(event) {
+        if (this.isLoadingSource) {
+            return;
+        }
+        const sourceId = event.target.value;
+        if (sourceId === this.activeSourceId) {
+            return;
+        }
+
+        const loaded = await this.loadEmbeddingSource(sourceId);
+        if (!loaded) {
+            event.target.value = this.activeSourceId;
+        }
+    }
+
+    // read raw model text and write vectors to vecs and vocab
+    processRawVecs(text) {
+        const modelState = this.parseRawVecs(text);
+        this.vecs = modelState.vecs;
+        this.vocab = modelState.vocab;
+        this.vecsDim = modelState.vecsDim;
     }
 
     // read raw nearest words text (see nearest words script) and write to nearestWords
     processNearestWords(text) {
-        const lines = text.trim().split(/\n/);
-        for (const line of lines) {
-            const entries = line.trim().split(' ');
-            const target = entries[0];
-            const words = entries.slice(1);
-            this.nearestWords.set(target, words);
-        }
+        this.nearestWords = this.parseNearestWords(text);
     }
 
     // create feature vectors by pairwise subtracting word vectors from lists
     // then average into one unit vector
     createFeature(vecs, wordList0, wordList1) {
         console.assert(wordList0.length === wordList1.length);
-        const subVecs = wordList0.map((word0, i) => vecs.get(word0).sub(vecs.get(wordList1[i])));
+        const subVecs = [];
+        for (let i = 0; i < wordList0.length; i++) {
+            const word0 = wordList0[i];
+            const word1 = wordList1[i];
+            if (!vecs.has(word0) || !vecs.has(word1)) {
+                continue;
+            }
+            subVecs.push(vecs.get(word0).sub(vecs.get(word1)));
+        }
+        if (subVecs.length === 0) {
+            return this.getEmptyVector();
+        }
         return subVecs.reduce((a, b) => a.add(b)).unit();
     }
 
     // use 1 - residual and scale residual for graphical convention (#3, #17)
     projectResidual(word) {
+        if (!this.vecs.has(word)) {
+            return 0;
+        }
         return 2 * (1 - this.vecs.get(word).dot(this.features[2]));
     }
 
@@ -139,14 +374,25 @@ class Demo {
     // as part of the process, computes features
     // used to refresh selected word
     plotScatter(newPlot = false) {
+        if (!this.modelReady) {
+            return;
+        }
+
+        if (this.selectedWord && !this.vecs.has(this.selectedWord)) {
+            this.selectedWord = "";
+        }
+
         // populate feature vectors
         this.features[0] = this.createFeature(this.vecs, this.featureWordsPairs[0][0], this.featureWordsPairs[0][1]);
         this.features[1] = this.createFeature(this.vecs, this.featureWordsPairs[1][0], this.featureWordsPairs[1][1]);
 
-        const residualWords = [...new Set(this.featureWordsPairs.flat(2))];
+        const residualWords = [...new Set(this.featureWordsPairs.flat(2))]
+            .filter(word => this.vecs.has(word));
 
         // residual dim calculation described in #3
-        this.features[2] = residualWords.map(word => {
+        this.features[2] = (residualWords.length === 0)
+            ? this.getEmptyVector()
+            : residualWords.map(word => {
                 const wordVec = this.vecs.get(word);
                 const wordNoFeature0 = wordVec.sub(this.features[0].scale(wordVec.dot(this.features[0])));
                 const wordResidual = wordNoFeature0.sub(this.features[1].scale(wordNoFeature0.dot(this.features[1])));
@@ -156,8 +402,10 @@ class Demo {
 
 
         // words to actually be plotted (so this.scatterWords is a little misleading)
-        let plotWords = this.scatterWords.concat(Object.values(this.analogy));
+        const analogyWords = Object.values(this.analogy).filter(word => this.vecs.has(word));
+        let plotWords = this.scatterWords.concat(analogyWords);
         plotWords = [...new Set(plotWords)]; // remove duplicates
+        plotWords = plotWords.filter(word => this.vecs.has(word));
 
         // y, z are simply projections onto features
         const x = plotWords.map(this.projectResidual, this);
@@ -175,13 +423,15 @@ class Demo {
         );
 
         // For each point, include numbered list of nearest words in hovertext
-        const hovertext = plotWords.map(target =>
-            `Reference word:<br>${target}<br>` +
-            "Nearest words:<br>" +
-            this.nearestWords.get(target)
-                .map((word, i) => `${i + 1}. ${word}`)
-                .join("<br>")
-        );
+        const hovertext = plotWords.map(target => {
+            const nearest = this.nearestWords.get(target) || [];
+            const nearestText = nearest.length === 0
+                ? "(nearest words unavailable)"
+                : nearest.map((word, i) => `${i + 1}. ${word}`).join("<br>");
+            return `Reference word:<br>${target}<br>` +
+                "Nearest words:<br>" +
+                nearestText;
+        });
 
         const ZOOM = 0.8;
         // save previous camera code (workaround for #9)
@@ -207,7 +457,7 @@ class Demo {
         // find range of sizes and set desired range
         const oldMin = Math.min(...sizes);
         const oldMax = Math.max(...sizes);
-        const oldRange = oldMax - oldMin;
+        const oldRange = oldMax - oldMin || 1;
         
         
         // scale all points between new limits of rmin and rmax
@@ -347,6 +597,9 @@ class Demo {
 
     // clear all words and set vector view to empty (#21)
     clearWords() {
+        if (!this.guardModelReady("Load an embedding source first.")) {
+            return;
+        }
         this.scatterWords = [];
         this.analogy = {};
 
@@ -361,6 +614,9 @@ class Demo {
 
     // handle feature button pressing
     selectFeature(axis) {
+        if (!this.guardModelReady("Load an embedding source first.")) {
+            return;
+        }
         const selectedWordInput = this.featureNames[axis];
         console.log("button", selectedWordInput);
 
@@ -379,6 +635,9 @@ class Demo {
 
     // after plotly plot, bind heatmap axis click event using d3
     updateHeatmapsOnWordClick() {
+        if (!this.modelReady) {
+            return;
+        }
         // affects all heatmaps since they all have .yaxislayer-above!
         // https://stackoverflow.com/a/47400462
         // console.log("Binding heatmap click event");
@@ -408,8 +667,12 @@ class Demo {
 
     // plot vector and magnify views
     plotVector(newPlot = false) {
+        if (!this.modelReady) {
+            return;
+        }
         // heatmap plots matrix of values in z
-        const z = this.vectorWords.map(word => this.vecs.get(word));
+        const emptyVec = this.vecs.get(this.EMPTY_FEATURE_NAME) || this.getEmptyVector();
+        const z = this.vectorWords.map(word => this.vecs.get(word) || emptyVec);
 
         // improve hover output format of vector display (#41)        
         const text = z.map((row, i) => row.map((item, j) => {
@@ -473,6 +736,9 @@ class Demo {
 
     // similar to plotVector
     plotMagnify(newPlot = false) {
+        if (!this.modelReady) {
+            return;
+        }
         // ensure this.hoverX will produce proper plot
         // bounds are inclusive
         const lo = this.hoverX - this.MAGNIFY_WINDOW;
@@ -588,6 +854,9 @@ class Demo {
     // handle user adding/removing words in form
     // refactored to accept and handle multiple separated words at a time (#51)
     modifyWord() {
+        if (!this.guardModelReady("Load an embedding source first.")) {
+            return;
+        }
         let addedWords = [];
         let removedWords = [];
         let absentWords = [];
@@ -674,6 +943,9 @@ class Demo {
     // vector y = x_b - x_a + x_c, find w* = argmax_w cossim(x_w, y)
     // convert words to lowercase before processing (#39)
     processAnalogy() {
+        if (!this.guardModelReady("Load an embedding source first.")) {
+            return;
+        }
         const wordA = this.cleanWordInput(document.getElementById("analogy-word-a").value.toLowerCase());
         const wordB = this.cleanWordInput(document.getElementById("analogy-word-b").value.toLowerCase());
         const wordC = this.cleanWordInput(document.getElementById("analogy-word-c").value.toLowerCase());
@@ -815,6 +1087,9 @@ class Demo {
 
     // handle one row submit: validate current row, then paired axis row if needed
     submitFeature(featureIdx) {
+        if (!this.guardModelReady("Load an embedding source first.")) {
+            return;
+        }
         document.getElementById("user-feature-message").innerText = "";
         this.clearFeatureInlineMessages();
 
@@ -841,6 +1116,9 @@ class Demo {
     // validate and apply currently selected X/Z-axis dimensions
     // used by axis dropdown changes and initial page loading
     processFeatureInput() {
+        if (!this.guardModelReady("Load an embedding source first.")) {
+            return;
+        }
         document.getElementById("user-feature-message").innerText = "";
         this.clearFeatureInlineMessages();
 
@@ -904,6 +1182,9 @@ class Demo {
 
     // (#29) user dropdown selection actions for custom features 
     dropDownActions(selectedId) {
+        if (!this.guardModelReady("Load an embedding source first.")) {
+            return;
+        }
         this.setFeatureAxes(selectedId);
         this.processFeatureInput();
     }
@@ -932,6 +1213,9 @@ class Demo {
 
     // switch "vector arithmetic mode" (#22)
     handleAnalogyToggle(element) {
+        if (!this.modelReady) {
+            return;
+        }
         // deselect word if user enters vector arithmetic mode (#37)
         this.selectedWord = ""; 
         // also turn off highlight prompt for vector plot if user enters vector arithmetic mode (#37)
@@ -1003,13 +1287,20 @@ class Demo {
     // bind click on scatter hover overlay (#50)
     addOverlayListener(){
         const overlay = document.getElementById("scatter-overlay");
+        if (overlay.dataset.boundClick === "true") {
+            return;
+        }
         overlay.addEventListener("click", () => {
             this.respondToScatterClick();
         });
+        overlay.dataset.boundClick = "true";
     }
 
     // highlight vector axis on scatter click
     respondToScatterClick(){
+        if (!this.modelReady || !this.dataScatter || !this.dataScatter.points || this.dataScatter.points.length === 0) {
+            return;
+        }
         const ptNum = this.dataScatter.points[0].pointNumber;
         const clickedWord = this.plotWords[ptNum];
         
@@ -1126,10 +1417,13 @@ class Demo {
 
     // hide or show magnitude numbers for vector magnitude plot depending on mode (#36) 
     formatMagnitudePlot(mode="default") {
-        if (mode === "similarity") {
+        if (mode === "similarity" && this.vecs.has(this.selectedWord)) {
             const selectedVector = this.vecs.get(this.selectedWord).unit();
             this.plotMagnifyTitle = "Similarity to "+`'${this.selectedWord}'`;
-            this.similarityValues = this.vectorWords.map(word => this.vecs.get(word).unit().dot(selectedVector).toFixed(2));
+            this.similarityValues = this.vectorWords.map(word => {
+                const vec = this.vecs.get(word) || this.vecs.get(this.EMPTY_FEATURE_NAME) || this.getEmptyVector();
+                return vec.unit().dot(selectedVector).toFixed(2);
+            });
             this.plotMagnifyShowTicks = true; 
             this.plotMagnifyColor = "red";    
             // hide magnitude plot when similarity mode active
@@ -1137,7 +1431,10 @@ class Demo {
         }
         else if (mode === "arithmetic") {
             this.plotMagnifyTitle = "Magnitude";
-            this.similarityValues = this.vectorWords.map(word => this.vecs.get(word).norm().toFixed(2));
+            this.similarityValues = this.vectorWords.map(word => {
+                const vec = this.vecs.get(word) || this.vecs.get(this.EMPTY_FEATURE_NAME) || this.getEmptyVector();
+                return vec.norm().toFixed(2);
+            });
             this.plotMagnifyShowTicks = true;        
             this.plotMagnifyColor = "blue";  
             // show magnitude plot
@@ -1153,72 +1450,86 @@ class Demo {
         }
     }
 
-    // fetch wordvecs locally (no error handling) and process
-    async main() {
-        // fill default feature for scatterplot
-        this.fillDimensionDefault();
-
-        // lo-tech progress indication
+    async loadEmbeddingSource(sourceId) {
+        const source = this.embeddingSources[sourceId];
         const loadingText = document.getElementById("loading-text");
         const loadingIcon = document.getElementById("loading-icon");
-        // this.blinkText(loadingText);
-        loadingText.innerText = "Downloading model...";
-        // show loading icon (#54)
+
+        if (!source) {
+            this.markModelUnavailable(`Unknown embedding source: ${sourceId}`);
+            return false;
+        }
+
+        this.isLoadingSource = true;
+        this.modelReady = false;
         loadingIcon.style.display = "flex";
+        this.setSourceStatus(`Loading ${source.label}...`, false);
 
-        // note python's http.server does not support response compression Content-Encoding
-        // browsers and servers support content-encoding, but manually compress to fit on github (#1)
-        const vecsResponse = await fetch("wordvecs50k.vec.gz");
-        const vecsBlob = await vecsResponse.blob();
-        const vecsBuf = await vecsBlob.arrayBuffer();
+        try {
+            loadingText.innerText = `Downloading ${source.label} vectors...`;
+            const vecsResponse = await fetch(source.vectorsUrl);
+            if (!vecsResponse.ok) {
+                throw new Error(`Could not load vectors file: ${source.vectorsUrl}`);
+            }
 
-        // async unpack vectors
-        loadingText.innerText = "Unpacking model...";
-        const vecsText = await this.unpackVectors(vecsBuf);
+            const vecsBlob = await vecsResponse.blob();
+            const vecsBuf = await vecsBlob.arrayBuffer();
 
-        loadingText.innerText = "Processing vectors...";
-        this.processRawVecs(vecsText);
+            loadingText.innerText = source.compressed ? "Unpacking vectors..." : "Reading vectors...";
+            const vecsText = source.compressed
+                ? await this.unpackVectors(vecsBuf)
+                : new TextDecoder().decode(vecsBuf);
 
-        // fetch nearest words list
-        const nearestWordsResponse = await fetch("nearest_words.txt");
-        const nearestWordsText = await nearestWordsResponse.text();
+            loadingText.innerText = "Processing vectors...";
+            const modelState = this.parseRawVecs(vecsText);
 
-        this.processNearestWords(nearestWordsText);
-        loadingText.innerText = "Model processing done";
-        // hide loading icon after processing completes
-        loadingIcon.style.display = "none";
+            loadingText.innerText = "Loading nearest words...";
+            let nearestWords = new Map();
+            if (source.nearestWordsUrl) {
+                const nearestWordsResponse = await fetch(source.nearestWordsUrl);
+                if (!nearestWordsResponse.ok) {
+                    throw new Error(`Could not load nearest words file: ${source.nearestWordsUrl}`);
+                }
+                const nearestWordsText = await nearestWordsResponse.text();
+                nearestWords = this.parseNearestWords(nearestWordsText);
+            }
 
-        // make empty feature available to all
-        const zeroArray = new Array(this.vecsDim).fill(0);
-        this.vecs.set(this.EMPTY_FEATURE_NAME, new Vector(zeroArray));
+            this.applyLoadedSource(sourceId, modelState, nearestWords);
+            loadingText.innerText = `${source.label} ready`;
+            this.setSourceStatus(`${source.label} loaded successfully`, false);
+            return true;
+        } catch (e) {
+            console.error(e);
+            loadingText.innerText = "";
+            const hasPriorModel = this.vecs.size > 0;
+            this.modelReady = hasPriorModel;
+            this.setSourceStatus(
+                hasPriorModel
+                    ? `Failed to load ${source.label}; still using ${this.embeddingSources[this.activeSourceId].label}`
+                    : `Failed to load ${source.label}: ${e.message}`,
+                true
+            );
+            return false;
+        } finally {
+            loadingIcon.style.display = "none";
+            this.isLoadingSource = false;
+        }
+    }
 
-        // analogy details event listener
-        const analogyDetails = document.getElementById("analogy-details");
-        analogyDetails.ontoggle = () => this.handleAnalogyToggle(analogyDetails);
+    // fetch wordvecs locally and process
+    async main() {
+        // fill default feature for scatterplot before model load
+        this.fillDimensionDefault();
+        this.resetDropdownAxes();
+        this.bindPersistentListeners();
 
-        // plot new plots for the first time
-        this.plotScatter(true);
-        this.plotVector(true);
-        this.processFeatureInput(); // processes words from selected semantic dimensions when the page loads (#45)
-        
-        // add thin similarity lines that are later moved when user clicks (#55)
-        this.initSimilarityLines();
+        const sourceSelect = document.getElementById("embedding-source-select");
+        sourceSelect.value = this.activeSourceId;
 
-        // add event listener to rescale points in 3D with drag (#43)
-        //TODO: scale while drag is on
-        const plotly_scatter = document.getElementById("plotly-scatter");
-        plotly_scatter.addEventListener("mouseup", () => {
-            this.plotScatter();
-        });
-
-        // hide all lines on mouse down (#53)
-        // TODO: hide when zooming
-        plotly_scatter.addEventListener("mousedown", () => {
-            this.updateSimilarityLines(true, false);
-        });
-
-        // make overlay clickable for hovertext (#50)
-        this.addOverlayListener();
+        const loaded = await this.loadEmbeddingSource(this.activeSourceId);
+        if (!loaded) {
+            sourceSelect.value = this.activeSourceId;
+        }
     }
 }
 
@@ -1230,9 +1541,15 @@ document.addEventListener("DOMContentLoaded", () => {
 
 // resize all plots on window resize (#52)
 window.addEventListener('resize', function() {
+    if (!demo.modelReady) {
+        return;
+    }
     const plotsToResize = ["plotly-scatter", "plotly-vector", "plotly-magnify"];
     plotsToResize.forEach(id => {
         const container = document.getElementById(id);
+        if (!container) {
+            return;
+        }
         const updatedDims = {
             width: parseInt(0.99 * container.offsetWidth),
             height: parseInt(0.99 * container.offsetHeight)

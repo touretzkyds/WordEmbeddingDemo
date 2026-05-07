@@ -94,6 +94,23 @@ body {
     margin-bottom: 10px;
 }
 
+#embedding-source-bar {
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    gap: 8px;
+    flex-wrap: wrap;
+    margin: 0 0 10px;
+}
+
+#embedding-source-select {
+    min-width: 170px;
+}
+
+#embedding-source-status {
+    min-height: 1.2em;
+}
+
 #loading-icon {
     display: flex;
     justify-content: center;
