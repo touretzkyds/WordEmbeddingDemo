@@ -1200,7 +1200,7 @@ class Demo {
         const selectedName = `feature${featureIdx}`;
         const axisName = document.querySelector(`.user-feature-name.${selectedName}`).value.trim();
         if (axisName.length === 0) {
-            this.setFeatureInlineMessage(featureIdx, "Specify a name for this axis.");
+            this.setFeatureInlineMessage(featureIdx, "Specify a name for this axis");
             return false;
         }
         return true;
