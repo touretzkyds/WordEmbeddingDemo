@@ -12,14 +12,14 @@ class Demo {
 
         this.embeddingSources = {
             "wordvecs50k": {
-                label: "wordvecs50k",
+                label: "Word2Vec 300dim",
                 vectorsUrl: "wordvecs50k.vec.gz",
                 nearestWordsUrl: "nearest_words.txt",
                 compressed: true,
                 available: true
             },
             "glove6b300d": {
-                label: "glove.6B.300d",
+                label: "GloVe 300dim",
                 vectorsUrl: "glove.6B.300d.vec.gz",
                 nearestWordsUrl: "nearest_words_glove.6B.300d.txt",
                 compressed: true,
