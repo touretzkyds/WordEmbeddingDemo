@@ -382,9 +382,17 @@ class Demo {
             this.selectedWord = "";
         }
 
-        // populate feature vectors
-        this.features[0] = this.createFeature(this.vecs, this.featureWordsPairs[0][0], this.featureWordsPairs[0][1]);
-        this.features[1] = this.createFeature(this.vecs, this.featureWordsPairs[1][0], this.featureWordsPairs[1][1]);
+        // populate feature vectors for currently selected axis dimensions
+        this.features[0] = this.createFeature(
+            this.vecs,
+            this.featureWordsPairs[this.idx0][0],
+            this.featureWordsPairs[this.idx0][1]
+        );
+        this.features[1] = this.createFeature(
+            this.vecs,
+            this.featureWordsPairs[this.idx1][0],
+            this.featureWordsPairs[this.idx1][1]
+        );
 
         const residualWords = [...new Set(this.featureWordsPairs.flat(2))]
             .filter(word => this.vecs.has(word));
@@ -541,16 +549,16 @@ class Demo {
                 },
                 yaxis: {
                     title: {
-                        text: this.featureNames[0],
+                        text: this.featureNames[this.idx0],
                         // color based on if axis feature is selected word
-                        font: {color: (this.selectedWord === this.featureNames[0]) ? "red" : "black"}
+                        font: {color: (this.selectedWord === this.featureNames[this.idx0]) ? "red" : "black"}
                     },
                     dtick: 0.1
                 },
                 zaxis: {
                     title: {
-                        text: this.featureNames[1],
-                        font: {color: (this.selectedWord === this.featureNames[1] ? "red" : "black")}
+                        text: this.featureNames[this.idx1],
+                        font: {color: (this.selectedWord === this.featureNames[this.idx1] ? "red" : "black")}
                     },
                     dtick: 0.1
                 },
@@ -617,11 +625,17 @@ class Demo {
         if (!this.guardModelReady("Load an embedding source first.")) {
             return;
         }
-        const selectedWordInput = this.featureNames[axis];
+        const featureIdx = (axis === 0) ? this.idx0 : this.idx1;
+        const selectedWordInput = this.featureNames[featureIdx];
         console.log("button", selectedWordInput);
 
         // add features as pseudo-words to vecs
-        this.vecs.set(selectedWordInput, this.features[axis]);
+        const featureVec = this.createFeature(
+            this.vecs,
+            this.featureWordsPairs[featureIdx][0],
+            this.featureWordsPairs[featureIdx][1]
+        );
+        this.vecs.set(selectedWordInput, featureVec);
 
         if (selectedWordInput === this.selectedWord) {  // deselect word
             this.selectedWord = "";
