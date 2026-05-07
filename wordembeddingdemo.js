@@ -116,6 +116,15 @@ class Demo {
         this.idx0 = 0;
         this.idx1 = 1;
         this.selectedFeatureNames = ["[gender]", "[age]"];
+        // default feature dirty status
+        this.featureDirty = new Array(this.defaultFeatureNames.length).fill(false);
+        // default feature button colors for saved, dirty, pending, and failed status
+        this.featureButtonColors = {
+            saved: {background: "#e6e6e6", text: "black"},
+            dirty: {background: "#7CFC00", text: "black"},
+            pending: {background: "black", text: "white"},
+            failed: {background: "black", text: "white"},
+        };
 
         // default settings for magnify plot vector display numbers (#36)
         this.formatMagnitudePlot("default")
@@ -248,6 +257,7 @@ class Demo {
         this.featureNames = this.defaultFeatureNames.slice();
         this.selectedFeatureNames = [this.featureNames[this.idx0], this.featureNames[this.idx1]];
         this.featureWordsPairs = this.cloneFeatureWordsPairs(this.defaultFeatureWordsPairs);
+        this.featureDirty = new Array(this.defaultFeatureNames.length).fill(false);
         this.sanitizeFeatureWordsByVocab();
 
         this.scatterWords = this.defaultScatterWords.filter(word => this.vocab.has(word));
@@ -274,6 +284,7 @@ class Demo {
         this.plotScatter(true);
         this.plotVector(true);
         this.processFeatureInput();
+        this.resetFeatureButtonStates();
 
         this.removeSimilarityLines();
         this.initSimilarityLines();
@@ -312,7 +323,86 @@ class Demo {
             this.onEmbeddingSourceChange(event);
         });
 
+        const userFeaturesForm = document.getElementById("user-features-form");
+        userFeaturesForm.addEventListener("input", (event) => {
+            this.handleFeatureDraftChange(event);
+        });
+        userFeaturesForm.addEventListener("change", (event) => {
+            this.handleFeatureDraftChange(event);
+        });
+
         this.listenersBound = true;
+    }
+
+    setFeatureButtonState(featureIdx, state) {
+        const button = document.getElementById(`feature-button${featureIdx}`);
+        const colorConfig = this.featureButtonColors[state];
+        if (!button || !colorConfig) {
+            return;
+        }
+        button.style.backgroundColor = colorConfig.background;
+        button.style.color = colorConfig.text;
+    }
+
+    resetFeatureButtonStates() {
+        for (let i = 0; i < this.defaultFeatureNames.length; i++) {
+            this.featureDirty[i] = false;
+            this.setFeatureButtonState(i, "saved");
+        }
+    }
+
+    markFeatureDirty(featureIdx) {
+        if (featureIdx < 0 || featureIdx >= this.defaultFeatureNames.length) {
+            return;
+        }
+        this.featureDirty[featureIdx] = true;
+        this.setFeatureButtonState(featureIdx, "dirty");
+        this.clearFeatureInlineMessage(featureIdx);
+    }
+
+    markFeatureSaved(featureIdx) {
+        this.featureDirty[featureIdx] = false;
+        this.setFeatureButtonState(featureIdx, "saved");
+    }
+
+    markFeatureFailed(featureIdx) {
+        this.setFeatureButtonState(featureIdx, "failed");
+    }
+
+    isAxisAssigned(featureIdx) {
+        const dropdown = document.getElementById(`dropdown${featureIdx}`);
+        return dropdown && dropdown.value !== "defaultValue";
+    }
+
+    getFeatureIdxFromElement(element) {
+        if (!element) {
+            return null;
+        }
+
+        if (element.id) {
+            const dropdownMatch = element.id.match(/^dropdown(\d+)$/);
+            if (dropdownMatch) {
+                return Number(dropdownMatch[1]);
+            }
+        }
+
+        if (element.classList) {
+            for (const className of element.classList) {
+                const featureMatch = className.match(/^feature(\d+)$/);
+                if (featureMatch) {
+                    return Number(featureMatch[1]);
+                }
+            }
+        }
+        return null;
+    }
+
+    handleFeatureDraftChange(event) {
+        const featureIdx = this.getFeatureIdxFromElement(event.target);
+        if (featureIdx === null) {
+            return;
+        }
+        this.markFeatureDirty(featureIdx);
     }
 
     async onEmbeddingSourceChange(event) {
@@ -1103,7 +1193,17 @@ class Demo {
         this.featureWordsPairs[featureIdx] = featureWordsPairInput;
         const selectedName = `feature${featureIdx}`;
         this.featureNames[featureIdx] =
-            this.formatFeatureName(document.querySelector(`.user-feature-name.${selectedName}`).value);
+            this.formatFeatureName(document.querySelector(`.user-feature-name.${selectedName}`).value.trim());
+    }
+
+    validateFeatureNameInput(featureIdx) {
+        const selectedName = `feature${featureIdx}`;
+        const axisName = document.querySelector(`.user-feature-name.${selectedName}`).value.trim();
+        if (axisName.length === 0) {
+            this.setFeatureInlineMessage(featureIdx, "Specify a name for this axis.");
+            return false;
+        }
+        return true;
     }
 
     // sync scatter axis button labels with selected feature names
@@ -1119,22 +1219,45 @@ class Demo {
         }
         document.getElementById("user-feature-message").innerText = "";
         this.clearFeatureInlineMessages();
+        this.setFeatureButtonState(featureIdx, "pending");
 
         const featureWordsPairInput = this.getFeatureWordsInput(featureIdx);
         if (!this.validateFeatureInput(featureIdx, featureWordsPairInput)) {
+            this.markFeatureFailed(featureIdx);
             return;
         }
-        this.saveFeatureInput(featureIdx, featureWordsPairInput);
 
-        const isAxisFeature = (featureIdx === this.idx0 || featureIdx === this.idx1);
+        const isAxisFeature = this.isAxisAssigned(featureIdx);
+        const validatedInputs = new Map([[featureIdx, featureWordsPairInput]]);
+
         if (isAxisFeature) {
+            if (!this.validateFeatureNameInput(featureIdx)) {
+                this.markFeatureFailed(featureIdx);
+                return;
+            }
+
             // lightweight rule: if one axis row is submitted, validate the other axis row too (between X-axis and Z-axis)
             const otherAxisIdx = (featureIdx === this.idx0) ? this.idx1 : this.idx0;
             const otherFeatureWordsPairInput = this.getFeatureWordsInput(otherAxisIdx);
             if (!this.validateFeatureInput(otherAxisIdx, otherFeatureWordsPairInput)) {
+                this.markFeatureFailed(featureIdx);
+                this.markFeatureFailed(otherAxisIdx);
                 return;
             }
-            this.saveFeatureInput(otherAxisIdx, otherFeatureWordsPairInput);
+            if (!this.validateFeatureNameInput(otherAxisIdx)) {
+                this.markFeatureFailed(featureIdx);
+                this.markFeatureFailed(otherAxisIdx);
+                return;
+            }
+            validatedInputs.set(otherAxisIdx, otherFeatureWordsPairInput);
+        }
+
+        validatedInputs.forEach((wordsPair, idx) => {
+            this.saveFeatureInput(idx, wordsPair);
+            this.markFeatureSaved(idx);
+        });
+
+        if (isAxisFeature) {
             this.updateScatterButtonLabels();
             this.plotScatter();
         }
@@ -1177,12 +1300,22 @@ class Demo {
             .forEach(elem => elem.remove());
     }
 
+    clearFeatureInlineMessage(featureIdx) {
+        const summary = document.querySelector(`#feature-details${featureIdx} summary`);
+        if (!summary) {
+            return;
+        }
+        summary.querySelectorAll(".user-feature-inline-message")
+            .forEach(elem => elem.remove());
+    }
+
     // attach an inline message next to a feature row's submit button
     setFeatureInlineMessage(featureIdx, message) {
         const summary = document.querySelector(`#feature-details${featureIdx} summary`);
         if (!summary) {
             return;
         }
+        this.clearFeatureInlineMessage(featureIdx);
         const msg = document.createElement("span");
         msg.className = "user-feature-inline-message";
         msg.innerText = message;
@@ -1213,7 +1346,8 @@ class Demo {
             return;
         }
         this.setFeatureAxes(selectedId);
-        this.processFeatureInput();
+        const selectedFeatureIdx = parseInt(selectedId[selectedId.length - 1]);
+        this.markFeatureDirty(selectedFeatureIdx);
     }
 
     // set X, Z axes as features selected by user (#29)
