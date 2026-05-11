@@ -76,9 +76,14 @@ body {
 
 
 .button {
-    height: 20px;
-    width: 100px;
+    min-width: 80px;
+    height: auto;
+    padding: 4px 10px;
+    line-height: 1.2;
+    box-sizing: border-box;
     display: inline-flex;
+    align-items: center;
+    justify-content: center;
 }
 
 .dropdown {
@@ -92,6 +97,23 @@ body {
 #loading-text {
     text-align: center;
     margin-bottom: 10px;
+}
+
+#embedding-source-bar {
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    gap: 8px;
+    flex-wrap: wrap;
+    margin: 0 0 10px;
+}
+
+#embedding-source-select {
+    min-width: 170px;
+}
+
+#embedding-source-status {
+    min-height: 1.2em;
 }
 
 #loading-icon {

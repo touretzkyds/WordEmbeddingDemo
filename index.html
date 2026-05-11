@@ -28,6 +28,14 @@
     <img src="loading-icon.gif" width=100 alt="loading-icon.gif">
 </div>
 <div id="loading-text"></div>
+<div id="embedding-source-bar">
+    <label for="embedding-source-select">Embedding source:</label>
+    <select id="embedding-source-select" class="dropdown">
+        <option value="wordvecs50k" selected>Word2Vec 300dim</option>
+        <option value="glove6b300d">GloVe 300dim</option>
+    </select>
+    <span id="embedding-source-status" aria-live="polite"></span>
+</div>
 
 <div id="plots-container">
     <div id="plotly-scatter"> 

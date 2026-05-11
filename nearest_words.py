@@ -21,7 +21,7 @@ def read_model(model_path, normalize=True):
     for i in range(N):
         line = model_lines[i].strip().split()
         words[i] = line[0]
-        v = np.array(line[1:], dtype=np.float)
+        v = np.array(line[1:], dtype=np.float64) # changed from np.float to np.float64 to avoid overflow
         if normalize:
             vecs[i,] = v / np.linalg.norm(v)  # normalize vecs
 
