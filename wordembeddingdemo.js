@@ -99,15 +99,35 @@ class Demo {
     }
 
     // read raw model text and write vectors to vecs and vocab
-    processRawVecs(text) {
-        const lines = text.trim().split(/\n/);
-        for (const line of lines) {
-            const entries = line.trim().split(' ');
-            this.vecsDim = entries.length - 1;
-            const word = entries[0];
-            const vec = new Vector(entries.slice(1).map(Number)).unit();  // normalize word vectors
-            this.vocab.add(word);
-            this.vecs.set(word, vec);
+    async processRawVecs(text, loadingText) {
+        const len = text.length;
+        let pos = 0;
+        let count = 0;
+
+        while (pos < len) {
+            let lineEnd = text.indexOf('\n', pos);
+            if (lineEnd === -1) lineEnd = len;
+
+            if (lineEnd > pos) {
+                const firstSpace = text.indexOf(' ', pos);
+                if (firstSpace !== -1 && firstSpace < lineEnd) {
+                    const word = text.substring(pos, firstSpace);
+                    const parts = text.substring(firstSpace + 1, lineEnd).trimEnd().split(' ');
+                    this.vecsDim = parts.length;
+                    const values = new Array(parts.length);
+                    for (let j = 0; j < parts.length; j++) values[j] = +parts[j];
+                    this.vocab.add(word);
+                    this.vecs.set(word, new Vector(values).unit());
+                    count++;
+                }
+            }
+
+            pos = lineEnd + 1;
+
+            if (count % 5000 === 0 && count > 0) {
+                loadingText.innerText = `Processing vectors (${count})...`;
+                await new Promise(r => setTimeout(r, 0));
+            }
         }
     }
 
@@ -735,14 +755,9 @@ class Demo {
     }
 
 
-    // inflate option to:"string" freezes browser, see https://github.com/nodeca/pako/issues/228
-    // TextDecoder may hang browser but seems much faster
     unpackVectors(vecsBuf) {
-        return new Promise((resolve) => {
-            const vecsUint8 = pako.inflate(vecsBuf);
-            const vecsText = new TextDecoder().decode(vecsUint8);
-            return resolve(vecsText);
-        });
+        const vecsUint8 = pako.inflate(new Uint8Array(vecsBuf));
+        return new TextDecoder().decode(vecsUint8);
     }
 
     // fill in HTML default words used to define semantic dimensions and feature names for scatterplot
@@ -1081,40 +1096,37 @@ class Demo {
         }
     }
 
-    // fetch wordvecs locally (no error handling) and process
     async main() {
-        // fill default feature for scatterplot
         this.fillDimensionDefault();
 
-        // lo-tech progress indication
         const loadingText = document.getElementById("loading-text");
         const loadingIcon = document.getElementById("loading-icon");
-        // this.blinkText(loadingText);
         loadingText.innerText = "Downloading model...";
-        // show loading icon (#54)
         loadingIcon.style.display = "flex";
 
-        // note python's http.server does not support response compression Content-Encoding
-        // browsers and servers support content-encoding, but manually compress to fit on github (#1)
-        const vecsResponse = await fetch("wordvecs50k.vec.gz");
-        const vecsBlob = await vecsResponse.blob();
-        const vecsBuf = await vecsBlob.arrayBuffer();
+        console.time("Total load time");
+        console.time("Download");
 
-        // async unpack vectors
+        // fetch both files in parallel; use arrayBuffer directly (skip blob)
+        const [vecsBuf, nearestWordsText] = await Promise.all([
+            fetch("wordvecs50k.vec.gz").then(r => r.arrayBuffer()),
+            fetch("nearest_words.txt").then(r => r.text())
+        ]);
+        console.timeEnd("Download");
+
         loadingText.innerText = "Unpacking model...";
-        const vecsText = await this.unpackVectors(vecsBuf);
+        await new Promise(r => setTimeout(r, 0));
 
-        loadingText.innerText = "Processing vectors...";
-        this.processRawVecs(vecsText);
+        console.time("Unpack");
+        const vecsText = this.unpackVectors(vecsBuf);
+        console.timeEnd("Unpack");
 
-        // fetch nearest words list
-        const nearestWordsResponse = await fetch("nearest_words.txt");
-        const nearestWordsText = await nearestWordsResponse.text();
+        await this.processRawVecs(vecsText, loadingText);
 
         this.processNearestWords(nearestWordsText);
         loadingText.innerText = "Model processing done";
-        // hide loading icon after processing completes
         loadingIcon.style.display = "none";
+        console.timeEnd("Total load time");
 
         // make empty feature available to all
         const zeroArray = new Array(this.vecsDim).fill(0);

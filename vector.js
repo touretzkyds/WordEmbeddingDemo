@@ -1,41 +1,70 @@
 // Simple Vector class, extending built-in Arrays
 class Vector extends Array {
-    // unpack if Array is passed in, otherwise just use Array constructor
-    constructor(...args) {
-        (args.length === 1 && Array.isArray(args[0]))
-            ? super(...args[0])
-            : super(...args);
+    constructor(data) {
+        if (Array.isArray(data)) {
+            super(data.length);
+            for (let i = 0; i < data.length; i++) this[i] = data[i];
+        } else {
+            super(data);
+        }
     }
 
+    // Inherited methods like .map(), .slice(), .filter() return plain Arrays
+    static get [Symbol.species]() { return Array; }
+
     add(other) {
-        return this.map((e, i) => e + other[i]);
+        const len = this.length;
+        const r = new Array(len);
+        for (let i = 0; i < len; i++) r[i] = this[i] + other[i];
+        return new Vector(r);
     }
 
     sub(other) {
-        return this.map((e, i) => e - other[i]);
+        const len = this.length;
+        const r = new Array(len);
+        for (let i = 0; i < len; i++) r[i] = this[i] - other[i];
+        return new Vector(r);
     }
 
     mul(other) {
-        return this.map((e, i) => e * other[i]);
+        const len = this.length;
+        const r = new Array(len);
+        for (let i = 0; i < len; i++) r[i] = this[i] * other[i];
+        return new Vector(r);
     }
 
     sum() {
-        return this.reduce((a, b) => a+b);
+        let s = 0;
+        for (let i = 0; i < this.length; i++) s += this[i];
+        return s;
     }
 
     scale(s) {
-        return this.map(e => s*e);
+        const len = this.length;
+        const r = new Array(len);
+        for (let i = 0; i < len; i++) r[i] = s * this[i];
+        return new Vector(r);
     }
 
     dot(other) {
-        return this.mul(other).sum();
+        let s = 0;
+        for (let i = 0; i < this.length; i++) s += this[i] * other[i];
+        return s;
     }
 
     norm() {
-        return Math.sqrt(this.dot(this));
+        let s = 0;
+        for (let i = 0; i < this.length; i++) s += this[i] * this[i];
+        return Math.sqrt(s);
     }
 
     unit() {
-        return this.scale(1 / this.norm());
+        const len = this.length;
+        let s = 0;
+        for (let i = 0; i < len; i++) s += this[i] * this[i];
+        const inv = 1 / Math.sqrt(s);
+        const r = new Array(len);
+        for (let i = 0; i < len; i++) r[i] = this[i] * inv;
+        return new Vector(r);
     }
 }
