@@ -141,11 +141,11 @@ body {
     height: 100%;
     background: linear-gradient(90deg, #4a90e2, #2e7dd7);
     border-radius: 7px;
-    /* Keep the easing short and linear: during streaming downloads the bar
-       gets many small updates per second, and a longer transition makes the
-       bar visibly lag behind the percentage text. 80ms is short enough to
-       track tight updates and long enough to make stage jumps animate. */
-    transition: width 80ms linear;
+    /* bar tracks the percentage text exactly. Larger stage jumps opt into a smooth transition*/
+}
+
+#loading-progress-fill.smooth {
+    transition: width 250ms ease-out;
 }
 
 #loading-progress-percent {

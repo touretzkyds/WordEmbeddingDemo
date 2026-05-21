@@ -1644,7 +1644,18 @@ class Demo {
         const text = document.getElementById("loading-text");
         const progress = document.getElementById("loading-progress");
         const clamped = Math.max(0, Math.min(100, percent));
+
+        // Auto-detect stage jumps: 
+        // small frequent updates get an instant width change so the bar tracks the percentage text exactly
+        // large jumps get a brief CSS transition for polish
+        const previous = typeof this.lastLoadingProgress === "number"
+            ? this.lastLoadingProgress
+            : 0;
+        const SMOOTH_DELTA = 3;
+        const smooth = Math.abs(clamped - previous) >= SMOOTH_DELTA;
+
         if (fill) {
+            fill.classList.toggle("smooth", smooth);
             fill.style.width = `${clamped}%`;
         }
         if (pct) {
@@ -1656,6 +1667,7 @@ class Demo {
         if (text && typeof label === "string") {
             text.innerText = label;
         }
+        this.lastLoadingProgress = clamped;
     }
 
     // Stream a fetch response while reporting progress between [startPct, endPct].
@@ -1796,8 +1808,10 @@ class Demo {
             loadingIcon.style.display = "none";
             const fill = document.getElementById("loading-progress-fill");
             if (fill) {
+                fill.classList.remove("smooth");
                 fill.style.width = "0%";
             }
+            this.lastLoadingProgress = 0;
             this.isLoadingSource = false;
         }
     }
