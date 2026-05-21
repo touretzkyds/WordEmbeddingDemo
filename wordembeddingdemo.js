@@ -16,14 +16,16 @@ class Demo {
                 vectorsUrl: "wordvecs50k.vec.gz",
                 nearestWordsUrl: "nearest_words.txt",
                 compressed: true,
-                available: true
+                available: true,
+                expectedBytes: 35111406
             },
             "glove6b300d": {
                 label: "GloVe 300dim",
                 vectorsUrl: "glove.6B.300d.vec.gz",
                 nearestWordsUrl: "nearest_words_glove.6B.300d.txt",
                 compressed: true,
-                available: true
+                available: true,
+                expectedBytes: 38449207
             }
         };
         this.activeSourceId = "wordvecs50k";
@@ -1611,9 +1613,87 @@ class Demo {
         }
     }
 
+    setLoadingProgress(percent, label) {
+        const fill = document.getElementById("loading-progress-fill");
+        const pct = document.getElementById("loading-progress-percent");
+        const text = document.getElementById("loading-text");
+        const progress = document.getElementById("loading-progress");
+        const clamped = Math.max(0, Math.min(100, percent));
+        if (fill) {
+            fill.style.width = `${clamped}%`;
+        }
+        if (pct) {
+            pct.innerText = `${Math.round(clamped)}%`;
+        }
+        if (progress) {
+            progress.setAttribute("aria-valuenow", `${Math.round(clamped)}`);
+        }
+        if (text && typeof label === "string") {
+            text.innerText = label;
+        }
+    }
+
+    // Stream a fetch response while reporting progress between [startPct, endPct].
+    // Returns a Uint8Array of all received bytes.
+    async downloadWithProgress(url, startPct, endPct, label, expectedBytes) {
+        const response = await fetch(url);
+        if (!response.ok) {
+            throw new Error(`Could not load file: ${url}`);
+        }
+
+        const contentLength = parseInt(response.headers.get("Content-Length") || "0", 10);
+        const total = contentLength > 0 ? contentLength : (expectedBytes || 0);
+        const range = endPct - startPct;
+        const reader = response.body && typeof response.body.getReader === "function"
+            ? response.body.getReader()
+            : null;
+
+        // Fallback: streaming not supported, just read whole body.
+        if (!reader) {
+            this.setLoadingProgress(startPct, label);
+            const buf = new Uint8Array(await response.arrayBuffer());
+            this.setLoadingProgress(endPct, label);
+            return buf;
+        }
+
+        const chunks = [];
+        let loaded = 0;
+        this.setLoadingProgress(startPct, label);
+
+        while (true) {
+            const { done, value } = await reader.read();
+            if (done) {
+                break;
+            }
+            chunks.push(value);
+            loaded += value.length;
+
+            if (total > 0) {
+                const pct = startPct + Math.min(1, loaded / total) * range;
+                const mb = (loaded / (1024 * 1024)).toFixed(1);
+                const totalMb = (total / (1024 * 1024)).toFixed(1);
+                this.setLoadingProgress(pct, `${label} (${mb} / ${totalMb} MB)`);
+            } else {
+                // Unknown total: asymptotically approach endPct so the bar still moves.
+                const fakeRatio = 1 - Math.exp(-loaded / 20000000);
+                const pct = startPct + fakeRatio * range;
+                const mb = (loaded / (1024 * 1024)).toFixed(1);
+                this.setLoadingProgress(pct, `${label} (${mb} MB)`);
+            }
+        }
+
+        const merged = new Uint8Array(loaded);
+        let offset = 0;
+        for (const chunk of chunks) {
+            merged.set(chunk, offset);
+            offset += chunk.length;
+        }
+        this.setLoadingProgress(endPct, label);
+        return merged;
+    }
+
     async loadEmbeddingSource(sourceId) {
         const source = this.embeddingSources[sourceId];
-        const loadingText = document.getElementById("loading-text");
         const loadingIcon = document.getElementById("loading-icon");
 
         if (!source) {
@@ -1623,28 +1703,32 @@ class Demo {
 
         this.isLoadingSource = true;
         this.modelReady = false;
+        this.setLoadingProgress(0, "");
         loadingIcon.style.display = "flex";
         this.setSourceStatus(`Loading ${source.label}...`, false);
 
         try {
-            loadingText.innerText = `Downloading ${source.label} vectors...`;
-            const vecsResponse = await fetch(source.vectorsUrl);
-            if (!vecsResponse.ok) {
-                throw new Error(`Could not load vectors file: ${source.vectorsUrl}`);
-            }
+            const vecsBytes = await this.downloadWithProgress(
+                source.vectorsUrl,
+                0,
+                70,
+                `Downloading ${source.label} vectors...`,
+                source.expectedBytes
+            );
 
-            const vecsBlob = await vecsResponse.blob();
-            const vecsBuf = await vecsBlob.arrayBuffer();
-
-            loadingText.innerText = source.compressed ? "Unpacking vectors..." : "Reading vectors...";
+            this.setLoadingProgress(70, source.compressed ? "Unpacking vectors..." : "Reading vectors...");
+            // Yield to let the browser paint the updated progress bar before the
+            // synchronous decompression / decode blocks the main thread.
+            await new Promise(r => setTimeout(r, 0));
             const vecsText = source.compressed
-                ? await this.unpackVectors(vecsBuf)
-                : new TextDecoder().decode(vecsBuf);
+                ? await this.unpackVectors(vecsBytes.buffer)
+                : new TextDecoder().decode(vecsBytes);
 
-            loadingText.innerText = "Processing vectors...";
+            this.setLoadingProgress(80, "Processing vectors...");
+            await new Promise(r => setTimeout(r, 0));
             const modelState = this.parseRawVecs(vecsText);
 
-            loadingText.innerText = "Loading nearest words...";
+            this.setLoadingProgress(95, "Loading nearest words...");
             let nearestWords = new Map();
             if (source.nearestWordsUrl) {
                 const nearestWordsResponse = await fetch(source.nearestWordsUrl);
@@ -1656,12 +1740,12 @@ class Demo {
             }
 
             this.applyLoadedSource(sourceId, modelState, nearestWords);
-            loadingText.innerText = `${source.label} ready`;
+            this.setLoadingProgress(100, `${source.label} ready`);
             this.setSourceStatus(`${source.label} loaded successfully`, false);
             return true;
         } catch (e) {
             console.error(e);
-            loadingText.innerText = "";
+            this.setLoadingProgress(0, "");
             const hasPriorModel = this.vecs.size > 0;
             this.modelReady = hasPriorModel;
             this.setSourceStatus(
@@ -1673,6 +1757,10 @@ class Demo {
             return false;
         } finally {
             loadingIcon.style.display = "none";
+            const fill = document.getElementById("loading-progress-fill");
+            if (fill) {
+                fill.style.width = "0%";
+            }
             this.isLoadingSource = false;
         }
     }
