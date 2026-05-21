@@ -168,14 +168,28 @@ class Demo {
         return true;
     }
 
-    parseRawVecs(text) {
+    // Yield once to the event loop so the browser can repaint pending DOM
+    // updates the loading-bar before resume
+    // setTimeout(0) is used instead of Promise.resolve() since microtasks do not allow the rendering steps to run between them
+    yieldUI() {
+        return new Promise(r => setTimeout(r, 0));
+    }
+
+    // Parses raw word-vector text
+    // onProgress (optional) is called with a 0..1 fraction at each yield point
+    async parseRawVecs(text, onProgress) {
         const vecs = new Map();
         const vocab = new Set();
         let vecsDim = 0;
 
         const lines = text.trim().split(/\n/);
-        for (const line of lines) {
-            const entries = line.trim().split(/\s+/);
+        const total = lines.length;
+
+        // ~2000 rows per yield gives ~25 progress updates for a 50k file
+        const CHUNK_SIZE = 2000;
+
+        for (let i = 0; i < total; i++) {
+            const entries = lines[i].trim().split(/\s+/);
             if (entries.length < 2) {
                 continue;
             }
@@ -188,10 +202,21 @@ class Demo {
             const vec = new Vector(rawVec).unit();
             vocab.add(word);
             vecs.set(word, vec);
+
+            if (i % CHUNK_SIZE === CHUNK_SIZE - 1 && i < total - 1) {
+                if (typeof onProgress === "function") {
+                    onProgress((i + 1) / total);
+                }
+                await this.yieldUI();
+            }
         }
 
         if (vecs.size === 0 || vecsDim === 0) {
             throw new Error("No vectors were parsed.");
+        }
+
+        if (typeof onProgress === "function") {
+            onProgress(1);
         }
 
         return {vecs, vocab, vecsDim};
@@ -423,8 +448,8 @@ class Demo {
     }
 
     // read raw model text and write vectors to vecs and vocab
-    processRawVecs(text) {
-        const modelState = this.parseRawVecs(text);
+    async processRawVecs(text) {
+        const modelState = await this.parseRawVecs(text);
         this.vecs = modelState.vecs;
         this.vocab = modelState.vocab;
         this.vecsDim = modelState.vecsDim;
@@ -1707,6 +1732,11 @@ class Demo {
         loadingIcon.style.display = "flex";
         this.setSourceStatus(`Loading ${source.label}...`, false);
 
+        // Guarantee the progress bar stays visible for at least some time even whenthe load finishes almost instantly
+        const MIN_VISIBLE_MS = 350;
+        const minVisible = new Promise(r => setTimeout(r, MIN_VISIBLE_MS));
+        let succeeded = false;
+
         try {
             const vecsBytes = await this.downloadWithProgress(
                 source.vectorsUrl,
@@ -1717,16 +1747,18 @@ class Demo {
             );
 
             this.setLoadingProgress(70, source.compressed ? "Unpacking vectors..." : "Reading vectors...");
-            // Yield to let the browser paint the updated progress bar before the
-            // synchronous decompression / decode blocks the main thread.
-            await new Promise(r => setTimeout(r, 0));
+            // Yield to let the browser paint the updated progress bar before the synchronous decompression/decode blocks the main thread
+            await this.yieldUI();
             const vecsText = source.compressed
                 ? await this.unpackVectors(vecsBytes.buffer)
                 : new TextDecoder().decode(vecsBytes);
 
             this.setLoadingProgress(80, "Processing vectors...");
-            await new Promise(r => setTimeout(r, 0));
-            const modelState = this.parseRawVecs(vecsText);
+            await this.yieldUI();
+            const modelState = await this.parseRawVecs(vecsText, (ratio) => {
+                // Map parsing progress (0..1) to the 80..95 portion of the bar.
+                this.setLoadingProgress(80 + ratio * 15);
+            });
 
             this.setLoadingProgress(95, "Loading nearest words...");
             let nearestWords = new Map();
@@ -1742,6 +1774,7 @@ class Demo {
             this.applyLoadedSource(sourceId, modelState, nearestWords);
             this.setLoadingProgress(100, `${source.label} ready`);
             this.setSourceStatus(`${source.label} loaded successfully`, false);
+            succeeded = true;
             return true;
         } catch (e) {
             console.error(e);
@@ -1756,6 +1789,10 @@ class Demo {
             );
             return false;
         } finally {
+            // Only honor the minimum-visible delay on success.
+            if (succeeded) {
+                await minVisible;
+            }
             loadingIcon.style.display = "none";
             const fill = document.getElementById("loading-progress-fill");
             if (fill) {
