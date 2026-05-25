@@ -1221,6 +1221,10 @@ class Demo {
             }
         }
 
+        // Merge Odd One Out inputs into scatter list without toggle/removal behavior.
+        this.scatterWords = [...new Set([...this.scatterWords, ...words])];
+        this.plotScatter();
+
         const vectors = words.map(word => this.vecs.get(word));
         const similarityMatrix = this.buildSimilarityMatrix(vectors);
         const outlier = this.computeOutlier(words, similarityMatrix);
