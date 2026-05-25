@@ -437,6 +437,7 @@ class Demo {
 
     async onEmbeddingSourceChange(event) {
         if (this.isLoadingSource) {
+            event.target.value = this.activeSourceId;
             return;
         }
         const sourceId = event.target.value;
@@ -2050,6 +2051,7 @@ class Demo {
     async loadEmbeddingSource(sourceId, options = {}) {
         const source = this.embeddingSources[sourceId];
         const loadingIcon = document.getElementById("loading-icon");
+        const sourceSelect = document.getElementById("embedding-source-select");
 
         if (!source) {
             this.markModelUnavailable(`Unknown embedding source: ${sourceId}`);
@@ -2058,6 +2060,9 @@ class Demo {
 
         this.isLoadingSource = true;
         this.modelReady = false;
+        if (sourceSelect) {
+            sourceSelect.disabled = true;
+        }
         this.setLoadingProgress(0, "");
         loadingIcon.style.display = "flex";
         this.setSourceStatus(`Loading ${source.label}...`, false);
@@ -2128,6 +2133,10 @@ class Demo {
             if (fill) {
                 fill.classList.remove("smooth");
                 fill.style.width = "0%";
+            }
+            if (sourceSelect) {
+                sourceSelect.value = this.activeSourceId;
+                sourceSelect.disabled = false;
             }
             this.lastLoadingProgress = 0;
             this.isLoadingSource = false;
