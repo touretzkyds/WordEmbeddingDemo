@@ -1221,14 +1221,22 @@ class Demo {
             }
         }
 
-        // Merge Odd One Out inputs into scatter list without toggle/removal behavior.
+        // Merge OddOneOut 4 words into scatter list without removal
         this.scatterWords = [...new Set([...this.scatterWords, ...words])];
-        this.plotScatter();
 
         const vectors = words.map(word => this.vecs.get(word));
         const similarityMatrix = this.buildSimilarityMatrix(vectors);
         const outlier = this.computeOutlier(words, similarityMatrix);
         const points = this.projectOddOneOutTo2D(similarityMatrix);
+
+        // Select the outlier from OddOneOut in scatter; clear the similarity lines
+        this.formatMagnitudePlot("default");
+        this.highlightVectorAxis(false);
+        this.updateSimilarityLines(true, false);
+        this.plotMagnify(false);
+        this.selectedWord = outlier.word;
+        this.plotScatter();
+        // Can consider to update this.vectorWords to the 4 words from OddOneOut in the future
 
         result.innerText = outlier.word;
         message.innerText = `Odd one out: ${outlier.word} (avg cosine: ${outlier.score.toFixed(3)})`;
