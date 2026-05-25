@@ -271,7 +271,7 @@ class Demo {
         }
     }
 
-    resetStateForSource() {
+    resetStateForSource(preferredScatterWords = null) {
         this.analogy = {};
         this.selectedWord = "";
         this.dataScatter = null;
@@ -287,7 +287,10 @@ class Demo {
         this.featureDirty = new Array(this.defaultFeatureNames.length).fill(false);
         this.sanitizeFeatureWordsByVocab();
 
-        this.scatterWords = this.defaultScatterWords.filter(word => this.vocab.has(word));
+        const scatterSeed = Array.isArray(preferredScatterWords)
+            ? preferredScatterWords
+            : this.defaultScatterWords;
+        this.scatterWords = [...new Set(scatterSeed)].filter(word => this.vocab.has(word));
         this.vectorWords = this.defaultVectorWords.map(word =>
             this.vocab.has(word) ? word : this.EMPTY_FEATURE_NAME
         );
@@ -295,14 +298,14 @@ class Demo {
         this.formatMagnitudePlot("default");
     }
 
-    applyLoadedSource(sourceId, modelState, nearestWords) {
+    applyLoadedSource(sourceId, modelState, nearestWords, options = {}) {
         this.vecs = modelState.vecs;
         this.vocab = modelState.vocab;
         this.vecsDim = modelState.vecsDim;
         this.nearestWords = nearestWords;
         this.modelReady = true;
 
-        this.resetStateForSource();
+        this.resetStateForSource(options.preferredScatterWords);
 
         this.vecs.set(this.EMPTY_FEATURE_NAME, this.getEmptyVector());
 
@@ -441,10 +444,52 @@ class Demo {
             return;
         }
 
-        const loaded = await this.loadEmbeddingSource(sourceId);
+        const hadPriorModel = this.modelReady && this.vecs.size > 0;
+        const preferredScatterWords = this.scatterWords.slice();
+
+        if (hadPriorModel) {
+            this.clearPlotsForSourceSwitch();
+            await this.yieldUI();
+        }
+
+        const loaded = await this.loadEmbeddingSource(sourceId, {preferredScatterWords});
         if (!loaded) {
             event.target.value = this.activeSourceId;
+            if (hadPriorModel) {
+                this.restorePlotsAfterFailedSourceSwitch();
+            }
         }
+    }
+
+    clearPlotsForSourceSwitch() {
+        this.selectedWord = "";
+        this.analogy = {};
+        this.dataScatter = null;
+        this.plotWords = [];
+        this.removeSimilarityLines();
+
+        const emptyLayout = {
+            margin: {l: 0, r: 0, t: 30, b: 0},
+            showlegend: false
+        };
+        const emptyConfig = {responsive: true, displayModeBar: false};
+
+        Plotly.newPlot("plotly-scatter", [], {
+            ...emptyLayout,
+            title: {text: "Word vector projection"}
+        }, emptyConfig);
+        Plotly.newPlot("plotly-vector", [], emptyLayout, emptyConfig);
+        Plotly.newPlot("plotly-magnify", [], emptyLayout, emptyConfig);
+    }
+
+    restorePlotsAfterFailedSourceSwitch() {
+        if (!this.guardModelReady()) {
+            return;
+        }
+        this.plotScatter(true);
+        this.plotVector(true);
+        this.plotMagnify(true);
+        this.initSimilarityLines();
     }
 
     // read raw model text and write vectors to vecs and vocab
@@ -2002,7 +2047,7 @@ class Demo {
         return merged;
     }
 
-    async loadEmbeddingSource(sourceId) {
+    async loadEmbeddingSource(sourceId, options = {}) {
         const source = this.embeddingSources[sourceId];
         const loadingIcon = document.getElementById("loading-icon");
 
@@ -2056,7 +2101,7 @@ class Demo {
                 nearestWords = this.parseNearestWords(nearestWordsText);
             }
 
-            this.applyLoadedSource(sourceId, modelState, nearestWords);
+            this.applyLoadedSource(sourceId, modelState, nearestWords, options);
             this.setLoadingProgress(100, `${source.label} ready`);
             this.setSourceStatus(`${source.label} loaded successfully`, false);
             succeeded = true;
