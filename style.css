@@ -21,56 +21,104 @@ body {
 
 /* other attributes:  */
 
-#analogy-table {
+#analogy-table,
+.analogy-table {
     border-collapse: collapse;
     width: 90%;
     margin-left: 3%;
 }
 
-#analogy-table td, #analogy-table th {
+#analogy-table td, #analogy-table th,
+.analogy-table td, .analogy-table th {
     border: 1px solid #ddd;
     padding: 8px;
 }
 
-#analogy-table tr:nth-child(even){background-color: #f2f2f2;}
+#analogy-table tr:nth-child(even),
+.analogy-table tr:nth-child(even){background-color: #f2f2f2;}
 
-#analogy-table td:nth-child(even){
+#analogy-table td:nth-child(even),
+.analogy-table td:nth-child(even){
     width: 6%;
     text-align: center;
 }
 
-#analogy-table td:nth-child(odd){
+#analogy-table td:nth-child(odd),
+.analogy-table td:nth-child(odd){
     width: 20%;
     text-align: center;
 }
 
-#analogy-table tr:hover {background-color: #ddd;}
+#analogy-table tr:hover,
+.analogy-table tr:hover {background-color: #ddd;}
 
-#analogy-table th {
+#analogy-table th,
+.analogy-table th {
     padding-top: 8px;
     padding-bottom: 8px;
     text-align: left;
 }
 
-#analogy-button {
+#analogy-button,
+.analogy-button {
     padding: 7px 10px;
     border-radius: 4px;
 }
 
-[id^="analogy-word"]{
+[id^="analogy-word"],
+[id^="odd-word"]{
     padding: 5px;
     font-size: 15px;
     width: 80%;
     color: blue;
 }
 
-[id^="analogy-word-wstar"]{
+[id^="analogy-word-wstar"],
+#odd-one-out-result{
     color: darkgreen;
 }
 
-#arith-symbol {
+#odd-one-out-result {
+    color: #d62728;
+}
+
+#arith-symbol,
+.arith-symbol {
     color: #ff7171;
     font-weight: bold;
+}
+
+#odd-one-out-content {
+    display: flex;
+    align-items: flex-start;
+    gap: 20px;
+    width: 94%;
+    margin: 10px 0 0 3%;
+}
+
+#odd-one-out-controls {
+    flex: 1 1 45%;
+    min-width: 0;
+}
+
+.odd-one-out-table {
+    width: 100%;
+    margin-left: 0;
+    table-layout: fixed;
+}
+
+#odd-one-out-details .odd-one-out-table th,
+#odd-one-out-details .odd-one-out-table td {
+    width: 16.66%;
+    text-align: center;
+}
+
+.odd-one-out-table input {
+    box-sizing: border-box;
+}
+
+#odd-one-out-result {
+    width: auto;
 }
 
 
@@ -216,6 +264,19 @@ details > form {
 output {
     display: inline-block;
     width: 15em;
+}
+
+#odd-one-out-message {
+    margin: 10px 0 0;
+    min-height: 1.2em;
+    color: #555;
+}
+
+#odd-one-out-plot {
+    flex: 1 1 55%;
+    min-width: 480px;
+    height: 460px;
+    margin: 0;
 }
 
 #user-features-form {

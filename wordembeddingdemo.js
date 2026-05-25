@@ -1143,6 +1143,279 @@ class Demo {
         this.plotMagnify(false);
     }
 
+    processOddOneOut() {
+        if (!this.guardModelReady("Load an embedding source first.")) {
+            return;
+        }
+
+        const words = [0, 1, 2, 3].map(i =>
+            this.cleanWordInput(document.getElementById(`odd-word-${i}`).value)
+        );
+        const message = document.getElementById("odd-one-out-message");
+        const result = document.getElementById("odd-one-out-result");
+
+        if (words.some(word => word === "")) {
+            message.innerText = "Please enter four words.";
+            result.innerText = "----";
+            return;
+        }
+
+        const duplicate = words.find((word, index) => words.indexOf(word) !== index);
+        if (duplicate) {
+            message.innerText = `"${duplicate}" is duplicated. Please enter four different words.`;
+            result.innerText = "----";
+            return;
+        }
+
+        for (const word of words) {
+            if (!this.vocab.has(word)) {
+                message.innerText = `"${word}" not found`;
+                result.innerText = "----";
+                return;
+            }
+        }
+
+        const vectors = words.map(word => this.vecs.get(word));
+        const similarityMatrix = this.buildSimilarityMatrix(vectors);
+        const outlier = this.computeOutlier(words, similarityMatrix);
+        const points = this.projectOddOneOutTo2D(similarityMatrix);
+
+        result.innerText = outlier.word;
+        message.innerText = `Odd one out: ${outlier.word} (avg cosine: ${outlier.score.toFixed(3)})`;
+        this.renderOddOneOutPlot(points, words, outlier.index, similarityMatrix, outlier.scores);
+    }
+
+    cosine(vecA, vecB) {
+        const normProduct = vecA.norm() * vecB.norm();
+        return normProduct === 0 ? 0 : vecA.dot(vecB) / normProduct;
+    }
+
+    buildSimilarityMatrix(vectors) {
+        const matrix = vectors.map(() => new Array(vectors.length).fill(0));
+        for (let i = 0; i < vectors.length; i++) {
+            for (let j = 0; j < vectors.length; j++) {
+                matrix[i][j] = i === j ? 1 : this.cosine(vectors[i], vectors[j]);
+            }
+        }
+        return matrix;
+    }
+
+    computeOutlier(words, similarityMatrix) {
+        const scores = words.map((word, i) => {
+            const total = similarityMatrix[i].reduce((sum, value, j) => {
+                return i === j ? sum : sum + value;
+            }, 0);
+            return total / (words.length - 1);
+        });
+        const index = scores.reduce((minIndex, score, i) =>
+            score < scores[minIndex] ? i : minIndex
+        , 0);
+
+        return { index, word: words[index], score: scores[index], scores };
+    }
+
+    projectOddOneOutTo2D(similarityMatrix) {
+        const n = similarityMatrix.length;
+        const distancesSquared = similarityMatrix.map((row, i) =>
+            row.map((similarity, j) => {
+                if (i === j) {
+                    return 0;
+                }
+                const distance = Math.max(0, 1 - similarity);
+                return distance * distance;
+            })
+        );
+
+        // Classical MDS: convert pairwise cosine distances into centered 2D coordinates.
+        const rowMeans = distancesSquared.map(row =>
+            row.reduce((sum, value) => sum + value, 0) / n
+        );
+        const colMeans = distancesSquared[0].map((_, j) =>
+            distancesSquared.reduce((sum, row) => sum + row[j], 0) / n
+        );
+        const totalMean = rowMeans.reduce((sum, value) => sum + value, 0) / n;
+        const gramMatrix = distancesSquared.map((row, i) =>
+            row.map((value, j) => -0.5 * (value - rowMeans[i] - colMeans[j] + totalMean))
+        );
+        const eigen = this.jacobiEigenDecomposition(gramMatrix)
+            .sort((a, b) => b.value - a.value);
+
+        const first = eigen[0];
+        const second = eigen[1];
+        if (!first || first.value <= 0) {
+            return this.circularOddOneOutPoints(n);
+        }
+
+        const xScale = Math.sqrt(first.value);
+        const yScale = second && second.value > 0 ? Math.sqrt(second.value) : 0;
+        return new Array(n).fill(0).map((_, i) => ({
+            x: first.vector[i] * xScale,
+            y: yScale === 0 ? 0 : second.vector[i] * yScale
+        }));
+    }
+
+    jacobiEigenDecomposition(matrix) {
+        const n = matrix.length;
+        const values = matrix.map(row => row.slice());
+        const vectors = new Array(n).fill(0).map((_, i) =>
+            new Array(n).fill(0).map((__, j) => i === j ? 1 : 0)
+        );
+
+        for (let iteration = 0; iteration < 100; iteration++) {
+            let p = 0;
+            let q = 1;
+            let max = Math.abs(values[p][q]);
+
+            for (let i = 0; i < n; i++) {
+                for (let j = i + 1; j < n; j++) {
+                    const candidate = Math.abs(values[i][j]);
+                    if (candidate > max) {
+                        max = candidate;
+                        p = i;
+                        q = j;
+                    }
+                }
+            }
+
+            if (max < 1e-10) {
+                break;
+            }
+
+            const angle = 0.5 * Math.atan2(2 * values[p][q], values[q][q] - values[p][p]);
+            const cos = Math.cos(angle);
+            const sin = Math.sin(angle);
+            const app = values[p][p];
+            const aqq = values[q][q];
+            const apq = values[p][q];
+
+            values[p][p] = cos * cos * app - 2 * sin * cos * apq + sin * sin * aqq;
+            values[q][q] = sin * sin * app + 2 * sin * cos * apq + cos * cos * aqq;
+            values[p][q] = 0;
+            values[q][p] = 0;
+
+            for (let k = 0; k < n; k++) {
+                if (k !== p && k !== q) {
+                    const akp = values[k][p];
+                    const akq = values[k][q];
+                    values[k][p] = cos * akp - sin * akq;
+                    values[p][k] = values[k][p];
+                    values[k][q] = sin * akp + cos * akq;
+                    values[q][k] = values[k][q];
+                }
+
+                const vkp = vectors[k][p];
+                const vkq = vectors[k][q];
+                vectors[k][p] = cos * vkp - sin * vkq;
+                vectors[k][q] = sin * vkp + cos * vkq;
+            }
+        }
+
+        return values.map((row, i) => ({
+            value: row[i],
+            vector: vectors.map(vectorRow => vectorRow[i])
+        }));
+    }
+
+    circularOddOneOutPoints(count) {
+        return new Array(count).fill(0).map((_, i) => {
+            const angle = (2 * Math.PI * i) / count;
+            return { x: Math.cos(angle), y: Math.sin(angle) };
+        });
+    }
+
+    renderOddOneOutPlot(points, words, outlierIndex, similarityMatrix, scores) {
+        const pairSimilarities = [];
+        for (let i = 0; i < words.length; i++) {
+            for (let j = i + 1; j < words.length; j++) {
+                pairSimilarities.push(similarityMatrix[i][j]);
+            }
+        }
+
+        const minSimilarity = Math.min(...pairSimilarities);
+        const maxSimilarity = Math.max(...pairSimilarities);
+        const similarityRange = maxSimilarity - minSimilarity;
+        const lineTraces = [];
+        const similarityLabels = [];
+
+        for (let i = 0; i < words.length; i++) {
+            for (let j = i + 1; j < words.length; j++) {
+                const similarity = similarityMatrix[i][j];
+                const strength = similarityRange === 0 ? 0.7 : (similarity - minSimilarity) / similarityRange;
+                const midpoint = {
+                    x: (points[i].x + points[j].x) / 2,
+                    y: (points[i].y + points[j].y) / 2
+                };
+                lineTraces.push({
+                    x: [points[i].x, points[j].x],
+                    y: [points[i].y, points[j].y],
+                    mode: "lines",
+                    type: "scatter",
+                    line: {
+                        color: `rgba(80, 80, 80, ${0.25 + 0.55 * strength})`,
+                        width: 1.5 + 4 * strength
+                    },
+                    hoverinfo: "none",
+                    showlegend: false
+                });
+                similarityLabels.push({
+                    x: midpoint.x,
+                    y: midpoint.y,
+                    text: similarity.toFixed(2),
+                    showarrow: false,
+                    font: { size: 11, color: "#333" },
+                    bgcolor: "rgba(255, 255, 255, 0.8)",
+                    borderpad: 2
+                });
+            }
+        }
+
+        const wordLabels = words.map((word, i) => ({
+            x: points[i].x,
+            y: points[i].y,
+            text: word,
+            showarrow: false,
+            yshift: 14,
+            font: {
+                size: 12,
+                color: i === outlierIndex ? "#d62728" : "#1f77b4"
+            },
+            bgcolor: "rgba(255, 255, 255, 0.85)",
+            borderpad: 1
+        }));
+
+        const pointTrace = {
+            x: points.map(point => point.x),
+            y: points.map(point => point.y),
+            mode: "markers",
+            type: "scatter",
+            marker: {
+                size: 14,
+                color: "#000",
+                line: {
+                    width: 1,
+                    color: "#333"
+                }
+            },
+            hoverinfo: "none",
+            showlegend: false
+        };
+
+        const layout = {
+            title: "Odd One Out Similarity Map",
+            margin: { l: 30, r: 30, t: 45, b: 30 },
+            xaxis: { visible: false, zeroline: false },
+            yaxis: { visible: false, zeroline: false, scaleanchor: "x" },
+            hovermode: false,
+            annotations: [...similarityLabels, ...wordLabels]
+        };
+
+        Plotly.newPlot("odd-one-out-plot", [...lineTraces, pointTrace], layout, {
+            responsive: true,
+            displayModeBar: false,
+            staticPlot: true
+        });
+    }
+
 
     // inflate option to:"string" freezes browser, see https://github.com/nodeca/pako/issues/228
     // TextDecoder may hang browser but seems much faster
@@ -1356,7 +1629,7 @@ class Demo {
         mirror.value = word.value;
         this.resetAnalogyWord(event.key);
     }
-    
+
     // clear analogy result as soon as user starts typing (#46)
     resetAnalogyWord(key){
         if (key != "Enter") { // do not reset if enter is pressed
