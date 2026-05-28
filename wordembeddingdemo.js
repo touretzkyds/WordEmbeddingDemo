@@ -447,6 +447,7 @@ class Demo {
 
         const hadPriorModel = this.modelReady && this.vecs.size > 0;
         const preferredScatterWords = this.scatterWords.slice();
+        const savedOddOneOutState = hadPriorModel ? this.captureOddOneOutState() : null;
 
         if (hadPriorModel) {
             this.clearPlotsForSourceSwitch();
@@ -458,6 +459,7 @@ class Demo {
             event.target.value = this.activeSourceId;
             if (hadPriorModel) {
                 this.restorePlotsAfterFailedSourceSwitch();
+                this.restoreOddOneOutState(savedOddOneOutState);
             }
         }
     }
@@ -468,6 +470,7 @@ class Demo {
         this.dataScatter = null;
         this.plotWords = [];
         this.removeSimilarityLines();
+        this.resetOddOneOutArea();
 
         const emptyLayout = {
             margin: {l: 0, r: 0, t: 30, b: 0},
@@ -1468,6 +1471,84 @@ class Demo {
         };
 
         Plotly.newPlot("odd-one-out-plot", [...lineTraces, pointTrace], layout, {
+            responsive: true,
+            displayModeBar: false,
+            staticPlot: true
+        });
+    }
+    // reset the OddOneOut area when the user switches embedding
+    resetOddOneOutArea() {
+        const message = document.getElementById("odd-one-out-message");
+        if (message) {
+            message.innerText = "";
+        }
+
+        const result = document.getElementById("odd-one-out-result");
+        if (result) {
+            result.innerText = "----";
+        }
+
+        const containerId = "odd-one-out-plot";
+        const container = document.getElementById(containerId);
+        if (!container) {
+            return;
+        }
+
+        Plotly.newPlot(containerId, [], {
+            title: "",
+            margin: { l: 30, r: 30, t: 20, b: 20 },
+            xaxis: { visible: false, zeroline: false },
+            yaxis: { visible: false, zeroline: false, scaleanchor: "x" },
+            hovermode: false
+        }, {
+            responsive: true,
+            displayModeBar: false,
+            staticPlot: true
+        });
+    }
+    // capture the state of the OddOneOut when the user switches embedding, in case for the restorePlotsAfterFailedSourceSwitch() 
+    captureOddOneOutState() {
+        const message = document.getElementById("odd-one-out-message");
+        const result = document.getElementById("odd-one-out-result");
+        const plotContainer = document.getElementById("odd-one-out-plot");
+
+        const state = {
+            message: message ? message.innerText : "",
+            result: result ? result.innerText : "----",
+            plotData: null,
+            plotLayout: null
+        };
+
+        if (!plotContainer || !Array.isArray(plotContainer.data) || plotContainer.data.length === 0) {
+            return state;
+        }
+
+        // Clone Plotly graph state so a failed switch can restore the exact prior visualization.
+        state.plotData = JSON.parse(JSON.stringify(plotContainer.data));
+        state.plotLayout = JSON.parse(JSON.stringify(plotContainer.layout));
+        return state;
+    }
+
+    restoreOddOneOutState(state) {
+        if (!state) {
+            return;
+        }
+
+        const message = document.getElementById("odd-one-out-message");
+        if (message) {
+            message.innerText = state.message || "";
+        }
+
+        const result = document.getElementById("odd-one-out-result");
+        if (result) {
+            result.innerText = state.result || "----";
+        }
+
+        if (!state.plotData || !state.plotLayout) {
+            return;
+        }
+
+        Plotly.newPlot("odd-one-out-plot", state.plotData, state.plotLayout, {
             responsive: true,
             displayModeBar: false,
             staticPlot: true
