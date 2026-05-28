@@ -1490,14 +1490,14 @@ class Demo {
                     hoverinfo: "none",
                     showlegend: false
                 });
-                const edgeMetric = linkMetrics.get(`${i}-${j}`);
-                const forceText = edgeMetric
-                    ? ` | F ${edgeMetric.forceMagnitude.toFixed(2)}`
-                    : "";
+                // const edgeMetric = linkMetrics.get(`${i}-${j}`);
+                // const forceText = edgeMetric
+                //     ? ` | F ${edgeMetric.forceMagnitude.toFixed(2)}`
+                //     : "";
                 similarityLabels.push({
                     x: midpoint.x,
                     y: midpoint.y,
-                    text: `${similarity.toFixed(2)}${forceText}`,
+                    text: `${similarity.toFixed(2)}`, //${forceText} removed Force value
                     showarrow: false,
                     font: { size: 11, color: "#333" },
                     bgcolor: "rgba(255, 255, 255, 0.8)",
