@@ -1230,7 +1230,7 @@ class Demo {
         const vectors = words.map(word => this.vecs.get(word));
         const similarityMatrix = this.buildSimilarityMatrix(vectors);
         const outlier = this.computeOutlier(words, similarityMatrix);
-        const points = this.projectOddOneOutTo2D(similarityMatrix);
+        const {points, linkMetrics} = this.projectOddOneOutTo2D(similarityMatrix);
 
         // Select the outlier from OddOneOut in scatter; clear the similarity lines
         this.formatMagnitudePlot("default");
@@ -1243,7 +1243,7 @@ class Demo {
 
         result.innerText = outlier.word;
         message.innerText = `Odd one out: ${outlier.word} (avg cosine: ${outlier.score.toFixed(3)})`;
-        this.renderOddOneOutPlot(points, words, outlier.index, similarityMatrix, outlier.scores);
+        this.renderOddOneOutPlot(points, words, outlier.index, similarityMatrix, outlier.scores, linkMetrics);
     }
 
     cosine(vecA, vecB) {
@@ -1277,42 +1277,114 @@ class Demo {
 
     projectOddOneOutTo2D(similarityMatrix) {
         const n = similarityMatrix.length;
-        const distancesSquared = similarityMatrix.map((row, i) =>
-            row.map((similarity, j) => {
-                if (i === j) {
-                    return 0;
-                }
-                const distance = Math.max(0, 1 - similarity);
-                return distance * distance;
-            })
-        );
-
-        // Classical MDS: convert pairwise cosine distances into centered 2D coordinates.
-        const rowMeans = distancesSquared.map(row =>
-            row.reduce((sum, value) => sum + value, 0) / n
-        );
-        const colMeans = distancesSquared[0].map((_, j) =>
-            distancesSquared.reduce((sum, row) => sum + row[j], 0) / n
-        );
-        const totalMean = rowMeans.reduce((sum, value) => sum + value, 0) / n;
-        const gramMatrix = distancesSquared.map((row, i) =>
-            row.map((value, j) => -0.5 * (value - rowMeans[i] - colMeans[j] + totalMean))
-        );
-        const eigen = this.jacobiEigenDecomposition(gramMatrix)
-            .sort((a, b) => b.value - a.value);
-
-        const first = eigen[0];
-        const second = eigen[1];
-        if (!first || first.value <= 0) {
-            return this.circularOddOneOutPoints(n);
+        if (n === 0) {
+            return {points: [], linkMetrics: new Map()};
         }
 
-        const xScale = Math.sqrt(first.value);
-        const yScale = second && second.value > 0 ? Math.sqrt(second.value) : 0;
-        return new Array(n).fill(0).map((_, i) => ({
-            x: first.vector[i] * xScale,
-            y: yScale === 0 ? 0 : second.vector[i] * yScale
-        }));
+        const springConfig = {
+            minDistance: 0.5,
+            maxDistance: 2.2,
+            minStrength: 0.08,
+            maxStrength: 0.42,
+            distanceExponent: 1.9,
+            strengthExponent: 2.1,
+            similarityEpsilon: 1e-6,
+            chargeStrength: -0.6,
+            collideRadius: 0.25,
+            iterations: 260,
+            initialJitter: 0.4 // initial jitter for the nodes, larger for more randomization
+        };
+
+        const nodes = new Array(n).fill(0).map((_, i) => {
+            const angle = (2 * Math.PI * i) / n;
+            return {
+                id: i,
+                x: Math.cos(angle) + (Math.random() - 0.5) * springConfig.initialJitter,
+                y: Math.sin(angle) + (Math.random() - 0.5) * springConfig.initialJitter
+            };
+        });
+
+        const pairSimilarities = [];
+        for (let i = 0; i < n; i++) {
+            for (let j = i + 1; j < n; j++) {
+                pairSimilarities.push(similarityMatrix[i][j]);
+            }
+        }
+        const minSimilarity = Math.min(...pairSimilarities);
+        const maxSimilarity = Math.max(...pairSimilarities);
+        const similarityRange = Math.max(
+            springConfig.similarityEpsilon,
+            maxSimilarity - minSimilarity
+        );
+
+        const links = [];
+        for (let i = 0; i < n; i++) {
+            for (let j = i + 1; j < n; j++) {
+                const similarity = similarityMatrix[i][j];
+                const normalizedSimilarity = Math.max(
+                    0,
+                    Math.min(1, (similarity - minSimilarity) / similarityRange)
+                );
+                const distanceRatio = Math.pow(
+                    1 - normalizedSimilarity,
+                    springConfig.distanceExponent
+                );
+                const strengthRatio = Math.pow(
+                    normalizedSimilarity,
+                    springConfig.strengthExponent
+                );
+                const targetDistance = springConfig.minDistance +
+                    distanceRatio * (springConfig.maxDistance - springConfig.minDistance);
+                const springStrength = springConfig.minStrength +
+                    strengthRatio * (springConfig.maxStrength - springConfig.minStrength);
+                links.push({
+                    source: i,
+                    target: j,
+                    similarity,
+                    targetDistance,
+                    springStrength
+                });
+            }
+        }
+
+        const simulation = d3.forceSimulation(nodes)
+            .force("link", d3.forceLink(links)
+                .id(d => d.id)
+                .distance(link => link.targetDistance)
+                .strength(link => link.springStrength)
+            )
+            .force("charge", d3.forceManyBody().strength(springConfig.chargeStrength))
+            .force("center", d3.forceCenter(0, 0))
+            .force("collide", d3.forceCollide(springConfig.collideRadius))
+            .stop();
+
+        for (let i = 0; i < springConfig.iterations; i++) {
+            simulation.tick();
+        }
+        simulation.stop();
+
+        const points = nodes.map(node => ({x: node.x, y: node.y}));
+        const linkMetrics = this.computeOddOneOutLinkMetrics(links);
+        return {points, linkMetrics};
+    }
+
+    computeOddOneOutLinkMetrics(links) {
+        const metrics = new Map();
+        for (const link of links) {
+            const sourceNode = (typeof link.source === "object") ? link.source : null;
+            const targetNode = (typeof link.target === "object") ? link.target : null;
+            if (!sourceNode || !targetNode) {
+                continue;
+            }
+            const i = Math.min(sourceNode.id, targetNode.id);
+            const j = Math.max(sourceNode.id, targetNode.id);
+            const dx = sourceNode.x - targetNode.x;
+            const dy = sourceNode.y - targetNode.y;
+            const currentDistance = Math.sqrt(dx * dx + dy * dy);
+            const forceMagnitude = Math.abs(link.springStrength * (currentDistance - link.targetDistance));
+            metrics.set(`${i}-${j}`, {forceMagnitude, currentDistance});
+        }
+        return metrics;
     }
 
     jacobiEigenDecomposition(matrix) {
@@ -1384,7 +1456,7 @@ class Demo {
         });
     }
 
-    renderOddOneOutPlot(points, words, outlierIndex, similarityMatrix, scores) {
+    renderOddOneOutPlot(points, words, outlierIndex, similarityMatrix, scores, linkMetrics = new Map()) {
         const pairSimilarities = [];
         for (let i = 0; i < words.length; i++) {
             for (let j = i + 1; j < words.length; j++) {
@@ -1418,10 +1490,14 @@ class Demo {
                     hoverinfo: "none",
                     showlegend: false
                 });
+                const edgeMetric = linkMetrics.get(`${i}-${j}`);
+                const forceText = edgeMetric
+                    ? ` | F ${edgeMetric.forceMagnitude.toFixed(2)}`
+                    : "";
                 similarityLabels.push({
                     x: midpoint.x,
                     y: midpoint.y,
-                    text: similarity.toFixed(2),
+                    text: `${similarity.toFixed(2)}${forceText}`,
                     showarrow: false,
                     font: { size: 11, color: "#333" },
                     bgcolor: "rgba(255, 255, 255, 0.8)",
