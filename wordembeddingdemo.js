@@ -1306,18 +1306,17 @@ class Demo {
             similarityEpsilon: 1e-6,
             chargeStrength: -0.6,
             collideRadius: 0.25,
-            iterations: 260,
-            initialJitter: 0.4 // initial jitter for the nodes, larger for more randomization
+            iterations: 360,
+            initialSpread: 0.15 // half-width of the random box; randomly seed node positions near the origin
         };
 
-        const nodes = new Array(n).fill(0).map((_, i) => {
-            const angle = (2 * Math.PI * i) / n;
-            return {
-                id: i,
-                x: Math.cos(angle) + (Math.random() - 0.5) * springConfig.initialJitter,
-                y: Math.sin(angle) + (Math.random() - 0.5) * springConfig.initialJitter
-            };
-        });
+        // Random coordinates for the nodes near the origin and add spring forces to expand them
+        // Each run creates an arbitrary global orientation while node distances stay same because of their fixed similarity gap
+        const nodes = new Array(n).fill(0).map((_, i) => ({
+            id: i,
+            x: (Math.random() - 0.5) * springConfig.initialSpread,
+            y: (Math.random() - 0.5) * springConfig.initialSpread
+        }));
 
         const pairSimilarities = [];
         for (let i = 0; i < n; i++) {
