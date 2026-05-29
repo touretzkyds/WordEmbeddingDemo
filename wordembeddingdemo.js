@@ -1202,24 +1202,27 @@ class Demo {
         );
         const message = document.getElementById("odd-one-out-message");
         const result = document.getElementById("odd-one-out-result");
+        const markOddOneOutInputError = (errorText) => {
+            message.classList.add("odd-one-out-error");
+            message.innerText = errorText;
+            result.innerText = "----";
+            this.clearOddOneOutPlot();
+        };
 
         if (words.some(word => word === "")) {
-            message.innerText = "Please enter four words.";
-            result.innerText = "----";
+            markOddOneOutInputError("Please enter four words.");
             return;
         }
 
         const duplicate = words.find((word, index) => words.indexOf(word) !== index);
         if (duplicate) {
-            message.innerText = `"${duplicate}" is duplicated. Please enter four different words.`;
-            result.innerText = "----";
+            markOddOneOutInputError(`"${duplicate}" is duplicated. Please enter four different words.`);
             return;
         }
 
         for (const word of words) {
             if (!this.vocab.has(word)) {
-                message.innerText = `"${word}" not found`;
-                result.innerText = "----";
+                markOddOneOutInputError(`"${word}" not found`);
                 return;
             }
         }
@@ -1241,8 +1244,9 @@ class Demo {
         this.plotScatter();
         // Can consider to update this.vectorWords to the 4 words from OddOneOut in the future
 
-        result.innerText = outlier.word;
+        message.classList.remove("odd-one-out-error");
         message.innerText = `Odd one out: ${outlier.word} (avg cosine: ${outlier.score.toFixed(3)})`;
+        result.innerText = outlier.word;
         this.renderOddOneOutPlot(points, words, outlier.index, similarityMatrix, outlier.scores, linkMetrics);
     }
 
@@ -1552,18 +1556,8 @@ class Demo {
             staticPlot: true
         });
     }
-    // reset the OddOneOut area when the user switches embedding
-    resetOddOneOutArea() {
-        const message = document.getElementById("odd-one-out-message");
-        if (message) {
-            message.innerText = "";
-        }
 
-        const result = document.getElementById("odd-one-out-result");
-        if (result) {
-            result.innerText = "----";
-        }
-
+    clearOddOneOutPlot() {
         const containerId = "odd-one-out-plot";
         const container = document.getElementById(containerId);
         if (!container) {
@@ -1582,6 +1576,22 @@ class Demo {
             staticPlot: true
         });
     }
+
+    // reset the OddOneOut plot when the user switches embedding
+    resetOddOneOutArea() {
+        const message = document.getElementById("odd-one-out-message");
+        if (message) {
+            message.classList.remove("odd-one-out-error");
+            message.innerText = "";
+        }
+
+        const result = document.getElementById("odd-one-out-result");
+        if (result) {
+            result.innerText = "----";
+        }
+
+        this.clearOddOneOutPlot();
+    }
     // capture the state of the OddOneOut when the user switches embedding, in case for the restorePlotsAfterFailedSourceSwitch() 
     captureOddOneOutState() {
         const message = document.getElementById("odd-one-out-message");
@@ -1590,6 +1600,7 @@ class Demo {
 
         const state = {
             message: message ? message.innerText : "",
+            messageIsError: Boolean(message && message.classList.contains("odd-one-out-error")),
             result: result ? result.innerText : "----",
             plotData: null,
             plotLayout: null
@@ -1612,6 +1623,7 @@ class Demo {
 
         const message = document.getElementById("odd-one-out-message");
         if (message) {
+            message.classList.toggle("odd-one-out-error", Boolean(state.messageIsError));
             message.innerText = state.message || "";
         }
 

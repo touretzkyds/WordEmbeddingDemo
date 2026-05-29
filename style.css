@@ -272,6 +272,10 @@ output {
     color: #555;
 }
 
+#odd-one-out-message.odd-one-out-error {
+    color: red;
+}
+
 #odd-one-out-plot {
     flex: 1 1 55%;
     min-width: 480px;
