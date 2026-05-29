@@ -739,8 +739,13 @@ class Demo {
         // replotting scatter3d produces ugly error (#10)
         Plotly.newPlot("plotly-scatter", data, layout);
 
-        // bind scatter click event
         let plotly_scatter = document.getElementById("plotly-scatter");
+        // remove old listeners before rebinding to avoid duplicate click toggles
+        if (typeof plotly_scatter.removeAllListeners === "function") {
+            plotly_scatter.removeAllListeners("plotly_click");
+            plotly_scatter.removeAllListeners("plotly_hover");
+            plotly_scatter.removeAllListeners("plotly_unhover");
+        }
         this.plotWords = plotWords;
         plotly_scatter.on("plotly_click", (data) => {
             this.respondToScatterClick();
