@@ -345,6 +345,12 @@ class Demo {
             }
             this.updateSimilarityLines(true, false);
         });
+        plotly_scatter.addEventListener("wheel", () => {
+            if (!this.modelReady) {
+                return;
+            }
+            this.updateSimilarityLines(true, false);
+        }, {passive: true});
 
         this.addOverlayListener();
 
