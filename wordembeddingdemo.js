@@ -1470,6 +1470,43 @@ class Demo {
         });
     }
 
+    // New approach: Using quadratic-bezier arc between two points so near edges
+    // (when two close words both connecting to a far outlier) bow apart instead of overlapping.
+    buildCurvedEdge(p0, p1, curvature, bulgeAwayFrom = null, steps = 18) {
+        const dx = p1.x - p0.x;
+        const dy = p1.y - p0.y;
+        const len = Math.hypot(dx, dy) ||1;
+        const midX = (p0.x + p1.x)/ 2;
+        const midY = (p0.y + p1.y)/ 2;
+        let nx = -dy / len;
+        let ny = dx / len;
+        if (bulgeAwayFrom) {
+            const away = (midX - bulgeAwayFrom.x) * nx + (midY - bulgeAwayFrom.y) * ny;
+            if (away < 0) {
+                nx = -nx;
+                ny = -ny;
+            }
+        }
+
+        const offset = curvature * len;
+        const cx = midX + nx * offset;
+        const cy = midY + ny * offset;
+
+        const xs = [];
+        const ys = [];
+        for (let s = 0; s <= steps; s++) {
+            const t = s / steps;
+            const u = 1 - t;
+            xs.push(u * u * p0.x + 2 * u * t * cx + t * t * p1.x);
+            ys.push(u * u * p0.y + 2 * u * t * cy + t * t * p1.y);
+        }
+
+        // Labeling
+        const labelX = 0.25 * p0.x + 0.5 * cx + 0.25 * p1.x;
+        const labelY = 0.25 * p0.y + 0.5 * cy + 0.25 * p1.y;
+        return { xs, ys, labelX, labelY };
+    }
+
     renderOddOneOutPlot(points, words, outlierIndex, similarityMatrix, scores, linkMetrics = new Map()) {
         const pairSimilarities = [];
         for (let i = 0; i < words.length; i++) {
@@ -1484,22 +1521,34 @@ class Demo {
         const lineTraces = [];
         const similarityLabels = [];
 
+        // curve edges away from the centroid to avoid overlap
+        const EDGE_CURVATURE = 0.12;
+        const EDGE_CURVE_STEPS = 18;
+        const centroid = {
+            x: points.reduce((sum, point) => sum + point.x, 0) / points.length,
+            y: points.reduce((sum, point) => sum + point.y, 0) / points.length
+        };
+
         for (let i = 0; i < words.length; i++) {
             for (let j = i + 1; j < words.length; j++) {
                 const similarity = similarityMatrix[i][j];
                 const strength = similarityRange === 0 ? 0.7 : (similarity - minSimilarity) / similarityRange;
-                const midpoint = {
-                    x: (points[i].x + points[j].x) / 2,
-                    y: (points[i].y + points[j].y) / 2
-                };
+                const edge = this.buildCurvedEdge(
+                    points[i],
+                    points[j],
+                    EDGE_CURVATURE,
+                    centroid,
+                    EDGE_CURVE_STEPS
+                );
                 lineTraces.push({
-                    x: [points[i].x, points[j].x],
-                    y: [points[i].y, points[j].y],
+                    x: edge.xs,
+                    y: edge.ys,
                     mode: "lines",
                     type: "scatter",
                     line: {
                         color: `rgba(80, 80, 80, ${0.25 + 0.55 * strength})`,
-                        width: 1.5 + 4 * strength
+                        width: 1.5 + 4 * strength,
+                        shape: "spline"
                     },
                     hoverinfo: "none",
                     showlegend: false
@@ -1509,8 +1558,8 @@ class Demo {
                 //     ? ` | F ${edgeMetric.forceMagnitude.toFixed(2)}`
                 //     : "";
                 similarityLabels.push({
-                    x: midpoint.x,
-                    y: midpoint.y,
+                    x: edge.labelX,
+                    y: edge.labelY,
                     text: `${similarity.toFixed(2)}`, //${forceText} removed Force value
                     showarrow: false,
                     font: { size: 11, color: "#333" },
