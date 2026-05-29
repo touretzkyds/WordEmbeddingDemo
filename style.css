@@ -91,13 +91,13 @@ body {
 #odd-one-out-content {
     display: flex;
     align-items: flex-start;
-    gap: 20px;
-    width: 94%;
-    margin: 10px 0 0 3%;
+    gap: 10px;
+    width: 98%;
+    margin: 10px 0 0 1%;
 }
 
 #odd-one-out-controls {
-    flex: 1 1 45%;
+    flex: 1 1 62%;
     min-width: 0;
 }
 
@@ -109,12 +109,27 @@ body {
 
 #odd-one-out-details .odd-one-out-table th,
 #odd-one-out-details .odd-one-out-table td {
-    width: 16.66%;
     text-align: center;
+}
+
+#odd-one-out-details .odd-one-out-table th:nth-child(-n+4),
+#odd-one-out-details .odd-one-out-table td:nth-child(-n+4) {
+    width: 18.5%;
+}
+
+#odd-one-out-details .odd-one-out-table th:nth-child(5),
+#odd-one-out-details .odd-one-out-table td:nth-child(5) {
+    width: 16%;
+}
+
+#odd-one-out-details .odd-one-out-table th:nth-child(6),
+#odd-one-out-details .odd-one-out-table td:nth-child(6) {
+    width: 10%;
 }
 
 .odd-one-out-table input {
     box-sizing: border-box;
+    width: 100%;
 }
 
 #odd-one-out-result {
@@ -277,8 +292,8 @@ output {
 }
 
 #odd-one-out-plot {
-    flex: 1 1 55%;
-    min-width: 480px;
+    flex: 1 1 38%;
+    min-width: 360px;
     height: 460px;
     margin: 0;
 }
