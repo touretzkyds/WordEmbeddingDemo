@@ -16,14 +16,16 @@ class Demo {
                 vectorsUrl: "wordvecs50k.vec.gz",
                 nearestWordsUrl: "nearest_words.txt",
                 compressed: true,
-                available: true
+                available: true,
+                expectedBytes: 35111406
             },
             "glove6b300d": {
                 label: "GloVe 300dim",
                 vectorsUrl: "glove.6B.300d.vec.gz",
                 nearestWordsUrl: "nearest_words_glove.6B.300d.txt",
                 compressed: true,
-                available: true
+                available: true,
+                expectedBytes: 38449207
             }
         };
         this.activeSourceId = "wordvecs50k";
@@ -166,14 +168,28 @@ class Demo {
         return true;
     }
 
-    parseRawVecs(text) {
+    // Yield once to the event loop so the browser can repaint pending DOM
+    // updates the loading-bar before resume
+    // setTimeout(0) is used instead of Promise.resolve() since microtasks do not allow the rendering steps to run between them
+    yieldUI() {
+        return new Promise(r => setTimeout(r, 0));
+    }
+
+    // Parses raw word-vector text
+    // onProgress (optional) is called with a 0..1 fraction at each yield point
+    async parseRawVecs(text, onProgress) {
         const vecs = new Map();
         const vocab = new Set();
         let vecsDim = 0;
 
         const lines = text.trim().split(/\n/);
-        for (const line of lines) {
-            const entries = line.trim().split(/\s+/);
+        const total = lines.length;
+
+        // ~2000 rows per yield gives ~25 progress updates for a 50k file
+        const CHUNK_SIZE = 2000;
+
+        for (let i = 0; i < total; i++) {
+            const entries = lines[i].trim().split(/\s+/);
             if (entries.length < 2) {
                 continue;
             }
@@ -186,10 +202,21 @@ class Demo {
             const vec = new Vector(rawVec).unit();
             vocab.add(word);
             vecs.set(word, vec);
+
+            if (i % CHUNK_SIZE === CHUNK_SIZE - 1 && i < total - 1) {
+                if (typeof onProgress === "function") {
+                    onProgress((i + 1) / total);
+                }
+                await this.yieldUI();
+            }
         }
 
         if (vecs.size === 0 || vecsDim === 0) {
             throw new Error("No vectors were parsed.");
+        }
+
+        if (typeof onProgress === "function") {
+            onProgress(1);
         }
 
         return {vecs, vocab, vecsDim};
@@ -244,7 +271,7 @@ class Demo {
         }
     }
 
-    resetStateForSource() {
+    resetStateForSource(preferredScatterWords = null) {
         this.analogy = {};
         this.selectedWord = "";
         this.dataScatter = null;
@@ -260,7 +287,10 @@ class Demo {
         this.featureDirty = new Array(this.defaultFeatureNames.length).fill(false);
         this.sanitizeFeatureWordsByVocab();
 
-        this.scatterWords = this.defaultScatterWords.filter(word => this.vocab.has(word));
+        const scatterSeed = Array.isArray(preferredScatterWords)
+            ? preferredScatterWords
+            : this.defaultScatterWords;
+        this.scatterWords = [...new Set(scatterSeed)].filter(word => this.vocab.has(word));
         this.vectorWords = this.defaultVectorWords.map(word =>
             this.vocab.has(word) ? word : this.EMPTY_FEATURE_NAME
         );
@@ -268,14 +298,14 @@ class Demo {
         this.formatMagnitudePlot("default");
     }
 
-    applyLoadedSource(sourceId, modelState, nearestWords) {
+    applyLoadedSource(sourceId, modelState, nearestWords, options = {}) {
         this.vecs = modelState.vecs;
         this.vocab = modelState.vocab;
         this.vecsDim = modelState.vecsDim;
         this.nearestWords = nearestWords;
         this.modelReady = true;
 
-        this.resetStateForSource();
+        this.resetStateForSource(options.preferredScatterWords);
 
         this.vecs.set(this.EMPTY_FEATURE_NAME, this.getEmptyVector());
 
@@ -315,6 +345,12 @@ class Demo {
             }
             this.updateSimilarityLines(true, false);
         });
+        plotly_scatter.addEventListener("wheel", () => {
+            if (!this.modelReady) {
+                return;
+            }
+            this.updateSimilarityLines(true, false);
+        }, {passive: true});
 
         this.addOverlayListener();
 
@@ -407,6 +443,7 @@ class Demo {
 
     async onEmbeddingSourceChange(event) {
         if (this.isLoadingSource) {
+            event.target.value = this.activeSourceId;
             return;
         }
         const sourceId = event.target.value;
@@ -414,15 +451,60 @@ class Demo {
             return;
         }
 
-        const loaded = await this.loadEmbeddingSource(sourceId);
+        const hadPriorModel = this.modelReady && this.vecs.size > 0;
+        const preferredScatterWords = this.scatterWords.slice();
+        const savedOddOneOutState = hadPriorModel ? this.captureOddOneOutState() : null;
+
+        if (hadPriorModel) {
+            this.clearPlotsForSourceSwitch();
+            await this.yieldUI();
+        }
+
+        const loaded = await this.loadEmbeddingSource(sourceId, {preferredScatterWords});
         if (!loaded) {
             event.target.value = this.activeSourceId;
+            if (hadPriorModel) {
+                this.restorePlotsAfterFailedSourceSwitch();
+                this.restoreOddOneOutState(savedOddOneOutState);
+            }
         }
     }
 
+    clearPlotsForSourceSwitch() {
+        this.selectedWord = "";
+        this.analogy = {};
+        this.dataScatter = null;
+        this.plotWords = [];
+        this.removeSimilarityLines();
+        this.resetOddOneOutArea();
+
+        const emptyLayout = {
+            margin: {l: 0, r: 0, t: 30, b: 0},
+            showlegend: false
+        };
+        const emptyConfig = {responsive: true, displayModeBar: false};
+
+        Plotly.newPlot("plotly-scatter", [], {
+            ...emptyLayout,
+            title: {text: "Word vector projection"}
+        }, emptyConfig);
+        Plotly.newPlot("plotly-vector", [], emptyLayout, emptyConfig);
+        Plotly.newPlot("plotly-magnify", [], emptyLayout, emptyConfig);
+    }
+
+    restorePlotsAfterFailedSourceSwitch() {
+        if (!this.guardModelReady()) {
+            return;
+        }
+        this.plotScatter(true);
+        this.plotVector(true);
+        this.plotMagnify(true);
+        this.initSimilarityLines();
+    }
+
     // read raw model text and write vectors to vecs and vocab
-    processRawVecs(text) {
-        const modelState = this.parseRawVecs(text);
+    async processRawVecs(text) {
+        const modelState = await this.parseRawVecs(text);
         this.vecs = modelState.vecs;
         this.vocab = modelState.vocab;
         this.vecsDim = modelState.vecsDim;
@@ -663,8 +745,13 @@ class Demo {
         // replotting scatter3d produces ugly error (#10)
         Plotly.newPlot("plotly-scatter", data, layout);
 
-        // bind scatter click event
         let plotly_scatter = document.getElementById("plotly-scatter");
+        // remove old listeners before rebinding to avoid duplicate click toggles
+        if (typeof plotly_scatter.removeAllListeners === "function") {
+            plotly_scatter.removeAllListeners("plotly_click");
+            plotly_scatter.removeAllListeners("plotly_hover");
+            plotly_scatter.removeAllListeners("plotly_unhover");
+        }
         this.plotWords = plotWords;
         plotly_scatter.on("plotly_click", (data) => {
             this.respondToScatterClick();
@@ -1116,6 +1203,505 @@ class Demo {
         this.plotMagnify(false);
     }
 
+    processOddOneOut() {
+        if (!this.guardModelReady("Load an embedding source first.")) {
+            return;
+        }
+
+        const words = [0, 1, 2, 3].map(i =>
+            this.cleanWordInput(document.getElementById(`odd-word-${i}`).value)
+        );
+        const message = document.getElementById("odd-one-out-message");
+        const result = document.getElementById("odd-one-out-result");
+        const markOddOneOutInputError = (errorText) => {
+            message.classList.add("odd-one-out-error");
+            message.innerText = errorText;
+            result.innerText = "----";
+            this.clearOddOneOutPlot();
+        };
+
+        if (words.some(word => word === "")) {
+            markOddOneOutInputError("Please enter four words.");
+            return;
+        }
+
+        const duplicate = words.find((word, index) => words.indexOf(word) !== index);
+        if (duplicate) {
+            markOddOneOutInputError(`"${duplicate}" is duplicated. Please enter four different words.`);
+            return;
+        }
+
+        for (const word of words) {
+            if (!this.vocab.has(word)) {
+                markOddOneOutInputError(`"${word}" not found`);
+                return;
+            }
+        }
+
+        // Merge OddOneOut 4 words into scatter list without removal
+        this.scatterWords = [...new Set([...this.scatterWords, ...words])];
+
+        const vectors = words.map(word => this.vecs.get(word));
+        const similarityMatrix = this.buildSimilarityMatrix(vectors);
+        const outlier = this.computeOutlier(words, similarityMatrix);
+        const {points, linkMetrics} = this.projectOddOneOutTo2D(similarityMatrix);
+
+        // Select the outlier from OddOneOut in scatter; clear the similarity lines
+        this.formatMagnitudePlot("default");
+        this.highlightVectorAxis(false);
+        this.updateSimilarityLines(true, false);
+        this.plotMagnify(false);
+        this.selectedWord = outlier.word;
+        this.plotScatter();
+        // Can consider to update this.vectorWords to the 4 words from OddOneOut in the future
+
+        message.classList.remove("odd-one-out-error");
+        message.innerText = `Odd one out: ${outlier.word} (avg cosine: ${outlier.score.toFixed(3)})`;
+        result.innerText = outlier.word;
+        this.renderOddOneOutPlot(points, words, outlier.index, similarityMatrix, outlier.scores, linkMetrics);
+    }
+
+    cosine(vecA, vecB) {
+        const normProduct = vecA.norm() * vecB.norm();
+        return normProduct === 0 ? 0 : vecA.dot(vecB) / normProduct;
+    }
+
+    buildSimilarityMatrix(vectors) {
+        const matrix = vectors.map(() => new Array(vectors.length).fill(0));
+        for (let i = 0; i < vectors.length; i++) {
+            for (let j = 0; j < vectors.length; j++) {
+                matrix[i][j] = i === j ? 1 : this.cosine(vectors[i], vectors[j]);
+            }
+        }
+        return matrix;
+    }
+
+    computeOutlier(words, similarityMatrix) {
+        const scores = words.map((word, i) => {
+            const total = similarityMatrix[i].reduce((sum, value, j) => {
+                return i === j ? sum : sum + value;
+            }, 0);
+            return total / (words.length - 1);
+        });
+        const index = scores.reduce((minIndex, score, i) =>
+            score < scores[minIndex] ? i : minIndex
+        , 0);
+
+        return { index, word: words[index], score: scores[index], scores };
+    }
+
+    projectOddOneOutTo2D(similarityMatrix) {
+        const n = similarityMatrix.length;
+        if (n === 0) {
+            return {points: [], linkMetrics: new Map()};
+        }
+
+        const springConfig = {
+            minDistance: 0.5,
+            maxDistance: 2.2,
+            minStrength: 0.08,
+            maxStrength: 0.42,
+            distanceExponent: 1.9,
+            strengthExponent: 2.1,
+            similarityEpsilon: 1e-6,
+            chargeStrength: -0.6,
+            collideRadius: 0.25,
+            iterations: 360,
+            initialSpread: 0.15 // half-width of the random box; randomly seed node positions near the origin
+        };
+
+        // Random coordinates for the nodes near the origin and add spring forces to expand them
+        // Each run creates an arbitrary global orientation while node distances stay same because of their fixed similarity gap
+        const nodes = new Array(n).fill(0).map((_, i) => ({
+            id: i,
+            x: (Math.random() - 0.5) * springConfig.initialSpread,
+            y: (Math.random() - 0.5) * springConfig.initialSpread
+        }));
+
+        const pairSimilarities = [];
+        for (let i = 0; i < n; i++) {
+            for (let j = i + 1; j < n; j++) {
+                pairSimilarities.push(similarityMatrix[i][j]);
+            }
+        }
+        const minSimilarity = Math.min(...pairSimilarities);
+        const maxSimilarity = Math.max(...pairSimilarities);
+        const similarityRange = Math.max(
+            springConfig.similarityEpsilon,
+            maxSimilarity - minSimilarity
+        );
+
+        const links = [];
+        for (let i = 0; i < n; i++) {
+            for (let j = i + 1; j < n; j++) {
+                const similarity = similarityMatrix[i][j];
+                const normalizedSimilarity = Math.max(
+                    0,
+                    Math.min(1, (similarity - minSimilarity) / similarityRange)
+                );
+                const distanceRatio = Math.pow(
+                    1 - normalizedSimilarity,
+                    springConfig.distanceExponent
+                );
+                const strengthRatio = Math.pow(
+                    normalizedSimilarity,
+                    springConfig.strengthExponent
+                );
+                const targetDistance = springConfig.minDistance +
+                    distanceRatio * (springConfig.maxDistance - springConfig.minDistance);
+                const springStrength = springConfig.minStrength +
+                    strengthRatio * (springConfig.maxStrength - springConfig.minStrength);
+                links.push({
+                    source: i,
+                    target: j,
+                    similarity,
+                    targetDistance,
+                    springStrength
+                });
+            }
+        }
+
+        const simulation = d3.forceSimulation(nodes)
+            .force("link", d3.forceLink(links)
+                .id(d => d.id)
+                .distance(link => link.targetDistance)
+                .strength(link => link.springStrength)
+            )
+            .force("charge", d3.forceManyBody().strength(springConfig.chargeStrength))
+            .force("center", d3.forceCenter(0, 0))
+            .force("collide", d3.forceCollide(springConfig.collideRadius))
+            .stop();
+
+        for (let i = 0; i < springConfig.iterations; i++) {
+            simulation.tick();
+        }
+        simulation.stop();
+
+        const points = nodes.map(node => ({x: node.x, y: node.y}));
+        const linkMetrics = this.computeOddOneOutLinkMetrics(links);
+        return {points, linkMetrics};
+    }
+
+    computeOddOneOutLinkMetrics(links) {
+        const metrics = new Map();
+        for (const link of links) {
+            const sourceNode = (typeof link.source === "object") ? link.source : null;
+            const targetNode = (typeof link.target === "object") ? link.target : null;
+            if (!sourceNode || !targetNode) {
+                continue;
+            }
+            const i = Math.min(sourceNode.id, targetNode.id);
+            const j = Math.max(sourceNode.id, targetNode.id);
+            const dx = sourceNode.x - targetNode.x;
+            const dy = sourceNode.y - targetNode.y;
+            const currentDistance = Math.sqrt(dx * dx + dy * dy);
+            const forceMagnitude = Math.abs(link.springStrength * (currentDistance - link.targetDistance));
+            metrics.set(`${i}-${j}`, {forceMagnitude, currentDistance});
+        }
+        return metrics;
+    }
+
+    jacobiEigenDecomposition(matrix) {
+        const n = matrix.length;
+        const values = matrix.map(row => row.slice());
+        const vectors = new Array(n).fill(0).map((_, i) =>
+            new Array(n).fill(0).map((__, j) => i === j ? 1 : 0)
+        );
+
+        for (let iteration = 0; iteration < 100; iteration++) {
+            let p = 0;
+            let q = 1;
+            let max = Math.abs(values[p][q]);
+
+            for (let i = 0; i < n; i++) {
+                for (let j = i + 1; j < n; j++) {
+                    const candidate = Math.abs(values[i][j]);
+                    if (candidate > max) {
+                        max = candidate;
+                        p = i;
+                        q = j;
+                    }
+                }
+            }
+
+            if (max < 1e-10) {
+                break;
+            }
+
+            const angle = 0.5 * Math.atan2(2 * values[p][q], values[q][q] - values[p][p]);
+            const cos = Math.cos(angle);
+            const sin = Math.sin(angle);
+            const app = values[p][p];
+            const aqq = values[q][q];
+            const apq = values[p][q];
+
+            values[p][p] = cos * cos * app - 2 * sin * cos * apq + sin * sin * aqq;
+            values[q][q] = sin * sin * app + 2 * sin * cos * apq + cos * cos * aqq;
+            values[p][q] = 0;
+            values[q][p] = 0;
+
+            for (let k = 0; k < n; k++) {
+                if (k !== p && k !== q) {
+                    const akp = values[k][p];
+                    const akq = values[k][q];
+                    values[k][p] = cos * akp - sin * akq;
+                    values[p][k] = values[k][p];
+                    values[k][q] = sin * akp + cos * akq;
+                    values[q][k] = values[k][q];
+                }
+
+                const vkp = vectors[k][p];
+                const vkq = vectors[k][q];
+                vectors[k][p] = cos * vkp - sin * vkq;
+                vectors[k][q] = sin * vkp + cos * vkq;
+            }
+        }
+
+        return values.map((row, i) => ({
+            value: row[i],
+            vector: vectors.map(vectorRow => vectorRow[i])
+        }));
+    }
+
+    circularOddOneOutPoints(count) {
+        return new Array(count).fill(0).map((_, i) => {
+            const angle = (2 * Math.PI * i) / count;
+            return { x: Math.cos(angle), y: Math.sin(angle) };
+        });
+    }
+
+    // New approach: Using quadratic-bezier arc between two points so near edges
+    // (when two close words both connecting to a far outlier) bow apart instead of overlapping.
+    buildCurvedEdge(p0, p1, curvature, bulgeAwayFrom = null, steps = 18) {
+        const dx = p1.x - p0.x;
+        const dy = p1.y - p0.y;
+        const len = Math.hypot(dx, dy) ||1;
+        const midX = (p0.x + p1.x)/ 2;
+        const midY = (p0.y + p1.y)/ 2;
+        let nx = -dy / len;
+        let ny = dx / len;
+        if (bulgeAwayFrom) {
+            const away = (midX - bulgeAwayFrom.x) * nx + (midY - bulgeAwayFrom.y) * ny;
+            if (away < 0) {
+                nx = -nx;
+                ny = -ny;
+            }
+        }
+
+        const offset = curvature * len;
+        const cx = midX + nx * offset;
+        const cy = midY + ny * offset;
+
+        const xs = [];
+        const ys = [];
+        for (let s = 0; s <= steps; s++) {
+            const t = s / steps;
+            const u = 1 - t;
+            xs.push(u * u * p0.x + 2 * u * t * cx + t * t * p1.x);
+            ys.push(u * u * p0.y + 2 * u * t * cy + t * t * p1.y);
+        }
+
+        // Labeling
+        const labelX = 0.25 * p0.x + 0.5 * cx + 0.25 * p1.x;
+        const labelY = 0.25 * p0.y + 0.5 * cy + 0.25 * p1.y;
+        return { xs, ys, labelX, labelY };
+    }
+
+    renderOddOneOutPlot(points, words, outlierIndex, similarityMatrix, scores, linkMetrics = new Map()) {
+        const pairSimilarities = [];
+        for (let i = 0; i < words.length; i++) {
+            for (let j = i + 1; j < words.length; j++) {
+                pairSimilarities.push(similarityMatrix[i][j]);
+            }
+        }
+
+        const minSimilarity = Math.min(...pairSimilarities);
+        const maxSimilarity = Math.max(...pairSimilarities);
+        const similarityRange = maxSimilarity - minSimilarity;
+        const lineTraces = [];
+        const similarityLabels = [];
+
+        // curve edges away from the centroid to avoid overlap
+        const EDGE_CURVATURE = 0.12;
+        const EDGE_CURVE_STEPS = 18;
+        const centroid = {
+            x: points.reduce((sum, point) => sum + point.x, 0) / points.length,
+            y: points.reduce((sum, point) => sum + point.y, 0) / points.length
+        };
+
+        for (let i = 0; i < words.length; i++) {
+            for (let j = i + 1; j < words.length; j++) {
+                const similarity = similarityMatrix[i][j];
+                const strength = similarityRange === 0 ? 0.7 : (similarity - minSimilarity) / similarityRange;
+                const edge = this.buildCurvedEdge(
+                    points[i],
+                    points[j],
+                    EDGE_CURVATURE,
+                    centroid,
+                    EDGE_CURVE_STEPS
+                );
+                lineTraces.push({
+                    x: edge.xs,
+                    y: edge.ys,
+                    mode: "lines",
+                    type: "scatter",
+                    line: {
+                        color: `rgba(80, 80, 80, ${0.25 + 0.55 * strength})`,
+                        width: 1.5 + 4 * strength,
+                        shape: "spline"
+                    },
+                    hoverinfo: "none",
+                    showlegend: false
+                });
+                // const edgeMetric = linkMetrics.get(`${i}-${j}`);
+                // const forceText = edgeMetric
+                //     ? ` | F ${edgeMetric.forceMagnitude.toFixed(2)}`
+                //     : "";
+                similarityLabels.push({
+                    x: edge.labelX,
+                    y: edge.labelY,
+                    text: `${similarity.toFixed(2)}`, //${forceText} removed Force value
+                    showarrow: false,
+                    font: { size: 11, color: "#333" },
+                    bgcolor: "rgba(255, 255, 255, 0.8)",
+                    borderpad: 2
+                });
+            }
+        }
+
+        const wordLabels = words.map((word, i) => ({
+            x: points[i].x,
+            y: points[i].y,
+            text: word,
+            showarrow: false,
+            yshift: 14,
+            font: {
+                size: 12,
+                color: i === outlierIndex ? "#d62728" : "#1f77b4"
+            },
+            bgcolor: "rgba(255, 255, 255, 0.85)",
+            borderpad: 1
+        }));
+
+        const pointTrace = {
+            x: points.map(point => point.x),
+            y: points.map(point => point.y),
+            mode: "markers",
+            type: "scatter",
+            marker: {
+                size: 14,
+                color: "#000",
+                line: {
+                    width: 1,
+                    color: "#333"
+                }
+            },
+            hoverinfo: "none",
+            showlegend: false
+        };
+
+        const layout = {
+            title: "Odd One Out Similarity Map",
+            margin: { l: 30, r: 30, t: 45, b: 30 },
+            xaxis: { visible: false, zeroline: false },
+            yaxis: { visible: false, zeroline: false, scaleanchor: "x" },
+            hovermode: false,
+            annotations: [...similarityLabels, ...wordLabels]
+        };
+
+        Plotly.newPlot("odd-one-out-plot", [...lineTraces, pointTrace], layout, {
+            responsive: true,
+            displayModeBar: false,
+            staticPlot: true
+        });
+    }
+
+    clearOddOneOutPlot() {
+        const containerId = "odd-one-out-plot";
+        const container = document.getElementById(containerId);
+        if (!container) {
+            return;
+        }
+
+        Plotly.newPlot(containerId, [], {
+            title: "",
+            margin: { l: 30, r: 30, t: 20, b: 20 },
+            xaxis: { visible: false, zeroline: false },
+            yaxis: { visible: false, zeroline: false, scaleanchor: "x" },
+            hovermode: false
+        }, {
+            responsive: true,
+            displayModeBar: false,
+            staticPlot: true
+        });
+    }
+
+    // reset the OddOneOut plot when the user switches embedding
+    resetOddOneOutArea() {
+        const message = document.getElementById("odd-one-out-message");
+        if (message) {
+            message.classList.remove("odd-one-out-error");
+            message.innerText = "";
+        }
+
+        const result = document.getElementById("odd-one-out-result");
+        if (result) {
+            result.innerText = "----";
+        }
+
+        this.clearOddOneOutPlot();
+    }
+    // capture the state of the OddOneOut when the user switches embedding, in case for the restorePlotsAfterFailedSourceSwitch() 
+    captureOddOneOutState() {
+        const message = document.getElementById("odd-one-out-message");
+        const result = document.getElementById("odd-one-out-result");
+        const plotContainer = document.getElementById("odd-one-out-plot");
+
+        const state = {
+            message: message ? message.innerText : "",
+            messageIsError: Boolean(message && message.classList.contains("odd-one-out-error")),
+            result: result ? result.innerText : "----",
+            plotData: null,
+            plotLayout: null
+        };
+
+        if (!plotContainer || !Array.isArray(plotContainer.data) || plotContainer.data.length === 0) {
+            return state;
+        }
+
+        // Clone Plotly graph state so a failed switch can restore the exact prior visualization.
+        state.plotData = JSON.parse(JSON.stringify(plotContainer.data));
+        state.plotLayout = JSON.parse(JSON.stringify(plotContainer.layout));
+        return state;
+    }
+
+    restoreOddOneOutState(state) {
+        if (!state) {
+            return;
+        }
+
+        const message = document.getElementById("odd-one-out-message");
+        if (message) {
+            message.classList.toggle("odd-one-out-error", Boolean(state.messageIsError));
+            message.innerText = state.message || "";
+        }
+
+        const result = document.getElementById("odd-one-out-result");
+        if (result) {
+            result.innerText = state.result || "----";
+        }
+
+        if (!state.plotData || !state.plotLayout) {
+            return;
+        }
+
+        Plotly.newPlot("odd-one-out-plot", state.plotData, state.plotLayout, {
+            responsive: true,
+            displayModeBar: false,
+            staticPlot: true
+        });
+    }
+
 
     // inflate option to:"string" freezes browser, see https://github.com/nodeca/pako/issues/228
     // TextDecoder may hang browser but seems much faster
@@ -1329,7 +1915,7 @@ class Demo {
         mirror.value = word.value;
         this.resetAnalogyWord(event.key);
     }
-    
+
     // clear analogy result as soon as user starts typing (#46)
     resetAnalogyWord(key){
         if (key != "Enter") { // do not reset if enter is pressed
@@ -1611,10 +2197,101 @@ class Demo {
         }
     }
 
-    async loadEmbeddingSource(sourceId) {
+    setLoadingProgress(percent, label) {
+        const fill = document.getElementById("loading-progress-fill");
+        const pct = document.getElementById("loading-progress-percent");
+        const text = document.getElementById("loading-text");
+        const progress = document.getElementById("loading-progress");
+        const clamped = Math.max(0, Math.min(100, percent));
+
+        // Auto-detect stage jumps: 
+        // small frequent updates get an instant width change so the bar tracks the percentage text exactly
+        // large jumps get a brief CSS transition for polish
+        const previous = typeof this.lastLoadingProgress === "number"
+            ? this.lastLoadingProgress
+            : 0;
+        const SMOOTH_DELTA = 3;
+        const smooth = Math.abs(clamped - previous) >= SMOOTH_DELTA;
+
+        if (fill) {
+            fill.classList.toggle("smooth", smooth);
+            fill.style.width = `${clamped}%`;
+        }
+        if (pct) {
+            pct.innerText = `${Math.round(clamped)}%`;
+        }
+        if (progress) {
+            progress.setAttribute("aria-valuenow", `${Math.round(clamped)}`);
+        }
+        if (text && typeof label === "string") {
+            text.innerText = label;
+        }
+        this.lastLoadingProgress = clamped;
+    }
+
+    // Stream a fetch response while reporting progress between [startPct, endPct].
+    // Returns a Uint8Array of all received bytes.
+    async downloadWithProgress(url, startPct, endPct, label, expectedBytes) {
+        const response = await fetch(url);
+        if (!response.ok) {
+            throw new Error(`Could not load file: ${url}`);
+        }
+
+        const contentLength = parseInt(response.headers.get("Content-Length") || "0", 10);
+        const total = contentLength > 0 ? contentLength : (expectedBytes || 0);
+        const range = endPct - startPct;
+        const reader = response.body && typeof response.body.getReader === "function"
+            ? response.body.getReader()
+            : null;
+
+        // Fallback: streaming not supported, just read whole body.
+        if (!reader) {
+            this.setLoadingProgress(startPct, label);
+            const buf = new Uint8Array(await response.arrayBuffer());
+            this.setLoadingProgress(endPct, label);
+            return buf;
+        }
+
+        const chunks = [];
+        let loaded = 0;
+        this.setLoadingProgress(startPct, label);
+
+        while (true) {
+            const { done, value } = await reader.read();
+            if (done) {
+                break;
+            }
+            chunks.push(value);
+            loaded += value.length;
+
+            if (total > 0) {
+                const pct = startPct + Math.min(1, loaded / total) * range;
+                const mb = (loaded / (1024 * 1024)).toFixed(1);
+                const totalMb = (total / (1024 * 1024)).toFixed(1);
+                this.setLoadingProgress(pct, `${label} (${mb} / ${totalMb} MB)`);
+            } else {
+                // Unknown total: asymptotically approach endPct so the bar still moves.
+                const fakeRatio = 1 - Math.exp(-loaded / 20000000);
+                const pct = startPct + fakeRatio * range;
+                const mb = (loaded / (1024 * 1024)).toFixed(1);
+                this.setLoadingProgress(pct, `${label} (${mb} MB)`);
+            }
+        }
+
+        const merged = new Uint8Array(loaded);
+        let offset = 0;
+        for (const chunk of chunks) {
+            merged.set(chunk, offset);
+            offset += chunk.length;
+        }
+        this.setLoadingProgress(endPct, label);
+        return merged;
+    }
+
+    async loadEmbeddingSource(sourceId, options = {}) {
         const source = this.embeddingSources[sourceId];
-        const loadingText = document.getElementById("loading-text");
         const loadingIcon = document.getElementById("loading-icon");
+        const sourceSelect = document.getElementById("embedding-source-select");
 
         if (!source) {
             this.markModelUnavailable(`Unknown embedding source: ${sourceId}`);
@@ -1623,28 +2300,42 @@ class Demo {
 
         this.isLoadingSource = true;
         this.modelReady = false;
+        if (sourceSelect) {
+            sourceSelect.disabled = true;
+        }
+        this.setLoadingProgress(0, "");
         loadingIcon.style.display = "flex";
         this.setSourceStatus(`Loading ${source.label}...`, false);
 
+        // Guarantee the progress bar stays visible for at least some time even whenthe load finishes almost instantly
+        const MIN_VISIBLE_MS = 350;
+        const minVisible = new Promise(r => setTimeout(r, MIN_VISIBLE_MS));
+        let succeeded = false;
+
         try {
-            loadingText.innerText = `Downloading ${source.label} vectors...`;
-            const vecsResponse = await fetch(source.vectorsUrl);
-            if (!vecsResponse.ok) {
-                throw new Error(`Could not load vectors file: ${source.vectorsUrl}`);
-            }
+            const vecsBytes = await this.downloadWithProgress(
+                source.vectorsUrl,
+                0,
+                70,
+                `Downloading ${source.label} vectors...`,
+                source.expectedBytes
+            );
 
-            const vecsBlob = await vecsResponse.blob();
-            const vecsBuf = await vecsBlob.arrayBuffer();
-
-            loadingText.innerText = source.compressed ? "Unpacking vectors..." : "Reading vectors...";
+            this.setLoadingProgress(70, source.compressed ? "Unpacking vectors..." : "Reading vectors...");
+            // Yield to let the browser paint the updated progress bar before the synchronous decompression/decode blocks the main thread
+            await this.yieldUI();
             const vecsText = source.compressed
-                ? await this.unpackVectors(vecsBuf)
-                : new TextDecoder().decode(vecsBuf);
+                ? await this.unpackVectors(vecsBytes.buffer)
+                : new TextDecoder().decode(vecsBytes);
 
-            loadingText.innerText = "Processing vectors...";
-            const modelState = this.parseRawVecs(vecsText);
+            this.setLoadingProgress(80, "Processing vectors...");
+            await this.yieldUI();
+            const modelState = await this.parseRawVecs(vecsText, (ratio) => {
+                // Map parsing progress (0..1) to the 80..95 portion of the bar.
+                this.setLoadingProgress(80 + ratio * 15);
+            });
 
-            loadingText.innerText = "Loading nearest words...";
+            this.setLoadingProgress(95, "Loading nearest words...");
             let nearestWords = new Map();
             if (source.nearestWordsUrl) {
                 const nearestWordsResponse = await fetch(source.nearestWordsUrl);
@@ -1655,13 +2346,14 @@ class Demo {
                 nearestWords = this.parseNearestWords(nearestWordsText);
             }
 
-            this.applyLoadedSource(sourceId, modelState, nearestWords);
-            loadingText.innerText = `${source.label} ready`;
+            this.applyLoadedSource(sourceId, modelState, nearestWords, options);
+            this.setLoadingProgress(100, `${source.label} ready`);
             this.setSourceStatus(`${source.label} loaded successfully`, false);
+            succeeded = true;
             return true;
         } catch (e) {
             console.error(e);
-            loadingText.innerText = "";
+            this.setLoadingProgress(0, "");
             const hasPriorModel = this.vecs.size > 0;
             this.modelReady = hasPriorModel;
             this.setSourceStatus(
@@ -1672,7 +2364,21 @@ class Demo {
             );
             return false;
         } finally {
+            // Only honor the minimum-visible delay on success.
+            if (succeeded) {
+                await minVisible;
+            }
             loadingIcon.style.display = "none";
+            const fill = document.getElementById("loading-progress-fill");
+            if (fill) {
+                fill.classList.remove("smooth");
+                fill.style.width = "0%";
+            }
+            if (sourceSelect) {
+                sourceSelect.value = this.activeSourceId;
+                sourceSelect.disabled = false;
+            }
+            this.lastLoadingProgress = 0;
             this.isLoadingSource = false;
         }
     }

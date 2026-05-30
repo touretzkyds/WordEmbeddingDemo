@@ -24,8 +24,10 @@
 </div>
 
 <div id="loading-icon">
-    <!-- img src="https://i.stack.imgur.com/kOnzy.gif" alt="loading-icon.gif"/ -->
-    <img src="loading-icon.gif" width=100 alt="loading-icon.gif">
+    <div id="loading-progress" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0">
+        <div id="loading-progress-fill"></div>
+    </div>
+    <div id="loading-progress-percent">0%</div>
 </div>
 <div id="loading-text"></div>
 <div id="embedding-source-bar">
@@ -108,6 +110,40 @@
             </tr>
 		</table>
     </form>
+
+</details>
+
+<!-- Odd One Out -->
+<details id="odd-one-out-details">
+    <summary>Odd One Out</summary>
+
+    <div id="odd-one-out-content">
+        <div id="odd-one-out-controls">
+            <!-- autocomplete off to disable Firefox from saving form entries -->
+            <form id="odd-one-out-form" action="javascript:demo.processOddOneOut()" autocomplete="off">
+                <table class="analogy-table odd-one-out-table">
+                    <tr>
+                        <th>Word 1</th>
+                        <th>Word 2</th>
+                        <th>Word 3</th>
+                        <th>Word 4</th>
+                        <th>Result</th>
+                        <th></th>
+                    </tr>
+                    <tr>
+                        <td><input id="odd-word-0" type="text" value="breakfast"></td>
+                        <td><input id="odd-word-1" type="text" value="cereal"></td>
+                        <td><input id="odd-word-2" type="text" value="lunch"></td>
+                        <td><input id="odd-word-3" type="text" value="dinner"></td>
+                        <td><output id="odd-one-out-result">----</output></td>
+                        <td><button class="analogy-button" type="submit">Submit</button></td>
+                    </tr>
+                </table>
+            </form>
+            <div id="odd-one-out-message" aria-live="polite"></div>
+        </div>
+        <div id="odd-one-out-plot"></div>
+    </div>
 
 </details>
 
