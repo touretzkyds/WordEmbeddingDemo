@@ -331,6 +331,14 @@ class Demo {
         const analogyDetails = document.getElementById("analogy-details");
         analogyDetails.ontoggle = () => this.handleAnalogyToggle(analogyDetails);
 
+        // auto-scroll the lower panels into view when they are opened
+        for (const panelId of ["odd-one-out-details", "custom-details"]) {
+            const panel = document.getElementById(panelId);
+            if (panel) {
+                panel.addEventListener("toggle", () => this.scrollPanelIntoView(panel));
+            }
+        }
+
         const plotly_scatter = document.getElementById("plotly-scatter");
         plotly_scatter.addEventListener("mouseup", () => {
             if (!this.modelReady) {
@@ -368,6 +376,21 @@ class Demo {
         });
 
         this.listenersBound = true;
+    }
+
+    // Scroll panel's summary to the top of the viewport once it's been opened
+    scrollPanelIntoView(details) {
+        if (!details || !details.open) {
+            return;
+        }
+        const prefersReducedMotion = window.matchMedia &&
+            window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+        setTimeout(() => {
+            details.scrollIntoView({
+                behavior: prefersReducedMotion ? "auto" : "smooth",
+                block: "start"
+            });
+        }, 70); // Short delay in ms
     }
 
     setFeatureButtonState(featureIdx, state) {
@@ -1986,6 +2009,8 @@ class Demo {
             // also turn off similarity lines (#55)
             this.removeSimilarityLines();
             this.initSimilarityLines();
+            // auto-scroll the panel into view when it is opened
+            this.scrollPanelIntoView(element);
     }
 
     // move element to a target position using left and top coordinates
