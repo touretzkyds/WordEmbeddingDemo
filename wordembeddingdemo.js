@@ -1330,16 +1330,15 @@ class Demo {
             chargeStrength: -0.6,
             collideRadius: 0.25,
             iterations: 360,
-            initialSpread: 0.15 // half-width of the random box; randomly seed node positions near the origin
+            seed: 0x9e3779b9 // use fixed seed so that layout is determined, but the orientation is different
         };
 
-        // Random coordinates for the nodes near the origin and add spring forces to expand them
-        // Each run creates an arbitrary global orientation while node distances stay same because of their fixed similarity gap
-        const nodes = new Array(n).fill(0).map((_, i) => ({
-            id: i,
-            x: (Math.random() - 0.5) * springConfig.initialSpread,
-            y: (Math.random() - 0.5) * springConfig.initialSpread
-        }));
+        // Deterministic seed
+        // The arbitrary-axes appearance is added later by a random rigid transform
+        const nodes = new Array(n).fill(0).map((_, i) => {
+            const angle = (2 * Math.PI * i) / n;
+            return {id: i, x: Math.cos(angle), y: Math.sin(angle)};
+        });
 
         const pairSimilarities = [];
         for (let i = 0; i < n; i++) {
@@ -1385,6 +1384,7 @@ class Demo {
         }
 
         const simulation = d3.forceSimulation(nodes)
+            .randomSource(this.makeSeededRandom(springConfig.seed))
             .force("link", d3.forceLink(links)
                 .id(d => d.id)
                 .distance(link => link.targetDistance)
@@ -1400,9 +1400,44 @@ class Demo {
         }
         simulation.stop();
 
-        const points = nodes.map(node => ({x: node.x, y: node.y}));
         const linkMetrics = this.computeOddOneOutLinkMetrics(links);
+
+        // Distances/ordering are now fixed; randomize only the global orientation for display.
+        const points = nodes.map(node => ({x: node.x, y: node.y}));
+        this.applyRandomDisplayTransform(points);
         return {points, linkMetrics};
+    }
+
+    // deterministic PRNG
+    makeSeededRandom(seed) {
+        let state = seed >>> 0;
+        return function () {
+            state = (state + 0x6D2B79F5) | 0;
+            let t = Math.imul(state ^ (state >>> 15), 1 | state);
+            t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+            return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+        };
+    }
+
+    // A rigid transform so that all pairwise distances and ordering are preserved,
+    // while the coordinate axes look arbitrary and random on each run
+    applyRandomDisplayTransform(points) {
+        if (points.length === 0) {
+            return;
+        }
+        const cx = points.reduce((sum, point) => sum + point.x, 0) / points.length;
+        const cy = points.reduce((sum, point) => sum + point.y, 0) / points.length;
+        const theta = Math.random() * 2 * Math.PI;
+        const cos = Math.cos(theta);
+        const sin = Math.sin(theta);
+        const flip = Math.random() < 0.5 ? -1 : 1; // random reflection across the x axis
+
+        for (const point of points) {
+            const dx = (point.x - cx) * flip;
+            const dy = point.y - cy;
+            point.x = cx + (dx * cos - dy * sin);
+            point.y = cy + (dx * sin + dy * cos);
+        }
     }
 
     computeOddOneOutLinkMetrics(links) {
