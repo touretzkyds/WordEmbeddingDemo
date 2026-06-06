@@ -133,6 +133,19 @@ class Demo {
 
         // create placeholder for similarity lines
         this.similarityLines = [];
+
+        // NeighborNavigator state
+        this.navigator = {
+            active: false,
+            startWord: "",
+            targetWord: "",
+            hintOn: false,
+            reachable: false,        // whether the target is reachable from the starting world
+            history: [],             // step stack as {word, neighbors, remaining, nextHint, scatterSnapshot}
+            savedScatterWords: null, // to restore the words in the scatter plot after NN finishes
+            savedSelectedWord: ""
+        };
+        this.NAVIGATOR_NEIGHBOR_COUNT = 10;
     }
 
     cloneFeatureWordsPairs(featureWordsPairs) {
@@ -274,6 +287,7 @@ class Demo {
     resetStateForSource(preferredScatterWords = null) {
         this.analogy = {};
         this.selectedWord = "";
+        this.resetNavigatorState();
         this.dataScatter = null;
         this.plotWords = [];
         this.hoverX = 0;
@@ -332,11 +346,18 @@ class Demo {
         analogyDetails.ontoggle = () => this.handleAnalogyToggle(analogyDetails);
 
         // auto-scroll the lower panels into view when they are opened
-        for (const panelId of ["odd-one-out-details", "custom-details"]) {
+        for (const panelId of ["odd-one-out-details", "custom-details", "navigator-details"]) {
             const panel = document.getElementById(panelId);
             if (panel) {
                 panel.addEventListener("toggle", () => this.scrollPanelIntoView(panel));
             }
+        }
+
+        const navigatorHintToggle = document.getElementById("navigator-hint-toggle");
+        if (navigatorHintToggle) {
+            navigatorHintToggle.addEventListener("change", (event) => {
+                this.setNavigatorHint(event.target.checked);
+            });
         }
 
         const plotly_scatter = document.getElementById("plotly-scatter");
@@ -496,6 +517,7 @@ class Demo {
     clearPlotsForSourceSwitch() {
         this.selectedWord = "";
         this.analogy = {};
+        this.resetNavigatorState();
         this.dataScatter = null;
         this.plotWords = [];
         this.removeSimilarityLines();
@@ -615,9 +637,21 @@ class Demo {
         const y = plotWords.map(word => this.vecs.get(word).dot(this.features[0]));
         const z = plotWords.map(word => this.vecs.get(word).dot(this.features[1]));
 
+        // NeighborNavigator highlight words
+        const navActive = this.navigator.active;
+        const navCurrent = navActive && this.navigator.history.length > 0
+            ? this.navigator.history[this.navigator.history.length - 1].word
+            : "";
+        const navTarget = navActive ? this.navigator.targetWord : "";
+        const navHint = this.navigatorHintWord();
+
         // color points by type with priority (#12)
         const color = plotWords.map(word =>
-            (word === this.selectedWord) ? "red" // selected word has highest priority
+            // NeighborNavigator colors are the priority
+            (navActive && word === navTarget) ? "#2ca02c"   // green goal
+            : (navActive && word === navCurrent) ? "red"     // current standing
+            : (navActive && word === navHint) ? "#ff7f0e"    // suggested next word
+            : (word === this.selectedWord) ? "red" // selected word has highest priority
             : (word === this.analogy.y) ? "pink"
             : (word === this.analogy.Wstar) ? "lime"
             : (Object.values(this.analogy).includes(word)) ? "blue"
@@ -810,6 +844,7 @@ class Demo {
         }
         this.scatterWords = [];
         this.analogy = {};
+        this.resetNavigatorState();
 
         this.vectorWords = new Array(this.VECTOR_DISPLAY_SIZE).fill(this.EMPTY_FEATURE_NAME);
 
@@ -2110,7 +2145,13 @@ class Demo {
         }
         const ptNum = this.dataScatter.points[0].pointNumber;
         const clickedWord = this.plotWords[ptNum];
-        
+
+        // NeighborNavigator takes over scatter clicks while playing (exclusive)
+        if (this.navigator.active) {
+            this.navigatorStep(clickedWord);
+            return;
+        }
+
         // actions if user clicks on (ie selects or deselects) a word in scatter plot
         if (clickedWord === this.selectedWord) { // deselect
             this.highlightVectorAxis(false); // turn off highlight prompt for vector plot
@@ -2128,6 +2169,367 @@ class Demo {
         this.plotScatter();
         // replot with similarity values
         this.plotMagnify();
+    }
+
+    // NeighborNavigator
+    // Breadth-first search over the directed nearest-neighbor graph
+    // Edges point from a word to each of its nearest words
+    // If the target is unreachable, steps is Infinity and nextWord is null
+    navigatorShortestSteps(fromWord, toWord) {
+        if (fromWord === toWord) {
+            return {steps: 0, nextWord: null};
+        }
+        const visited = new Set([fromWord]);
+        const parent = new Map();
+        let frontier = [fromWord];
+        let depth = 0;
+
+        while (frontier.length > 0) {
+            depth++;
+            const next = [];
+            for (const word of frontier) {
+                const neighbors = this.nearestWords.get(word) || [];
+                for (const neighbor of neighbors) {
+                    if (visited.has(neighbor)) {
+                        continue;
+                    }
+                    visited.add(neighbor);
+                    parent.set(neighbor, word);
+                    if (neighbor === toWord) {
+                        // walk parents back to the word close to fromWord
+                        let step = neighbor;
+                        while (parent.get(step) !== fromWord) {
+                            step = parent.get(step);
+                        }
+                        return {steps: depth, nextWord: step};
+                    }
+                    next.push(neighbor);
+                }
+            }
+            frontier = next;
+        }
+        return {steps: Infinity, nextWord: null};
+    }
+
+    // Fallback for when the target is unreachable:
+    // pick the current word's neighbor with the highest cosine similarity to the target
+    navigatorGreedyNext(fromWord, toWord) {
+        const neighbors = this.nearestWords.get(fromWord) || [];
+        const targetVec = this.vecs.get(toWord);
+        if (!targetVec) {
+            return null;
+        }
+        let bestWord = null;
+        let bestScore = -Infinity;
+        for (const neighbor of neighbors) {
+            const vec = this.vecs.get(neighbor);
+            if (!vec) {
+                continue;
+            }
+            const score = this.cosine(vec, targetVec);
+            if (score > bestScore) {
+                bestScore = score;
+                bestWord = neighbor;
+            }
+        }
+        return bestWord;
+    }
+
+    // Determine how many steps remain to reach the target word and suggest the next best move
+    // Use shortest-path hints if reachable, otherwise use greedy similarity hints
+    navigatorComputeGuidance(fromWord) {
+        const target = this.navigator.targetWord;
+        if (fromWord === target) {
+            return {remaining: 0, nextHint: null, reachable: true};
+        }
+        const {steps, nextWord} = this.navigatorShortestSteps(fromWord, target);
+        if (steps !== Infinity) {
+            return {remaining: steps, nextHint: nextWord, reachable: true};
+        }
+        return {remaining: Infinity, nextHint: this.navigatorGreedyNext(fromWord, target), reachable: false};
+    }
+
+    // Build the scatterplot for the current navigator step, with the word and its nearest words
+    navigatorSceneFor(word) {
+        const neighbors = this.nearestWords.get(word) || [];
+        const scene = [word, ...neighbors.slice(0, this.NAVIGATOR_NEIGHBOR_COUNT)];
+        return [...new Set(scene)].filter(w => this.vecs.has(w));
+    }
+
+    // Begin a navigation run
+    startNavigator() {
+        if (!this.guardModelReady("Load an embedding source first.")) {
+            return;
+        }
+        const message = document.getElementById("navigator-message");
+        const startWord = this.cleanWordInput(document.getElementById("navigator-start").value);
+        const targetWord = this.cleanWordInput(document.getElementById("navigator-target").value);
+
+        const setError = (text) => {
+            message.classList.add("navigator-error");
+            message.innerText = text;
+        };
+
+        if (startWord === "" || targetWord === "") {
+            setError("Please enter both a start word and a target word.");
+            return;
+        }
+        if (!this.vocab.has(startWord)) {
+            setError(`"${startWord}" not found in this embedding.`);
+            return;
+        }
+        if (!this.vocab.has(targetWord)) {
+            setError(`"${targetWord}" not found in this embedding.`);
+            return;
+        }
+        if (startWord === targetWord) {
+            setError("Start and target words must be different.");
+            return;
+        }
+
+        message.classList.remove("navigator-error");
+        message.innerText = "";
+
+        // Save the current scene so after NN the original scatterplot will be restored
+        if (!this.navigator.active) {
+            this.navigator.savedScatterWords = this.scatterWords.slice();
+            this.navigator.savedSelectedWord = this.selectedWord;
+        }
+
+        // leave any prior modes clean before NN takes over the scatter plot
+        this.analogy = {};
+        this.selectedWord = "";
+        this.highlightVectorAxis(false);
+        this.formatMagnitudePlot("default");
+        this.updateSimilarityLines(true, false);
+
+        this.navigator.active = true;
+        this.navigator.startWord = startWord;
+        this.navigator.targetWord = targetWord;
+        this.navigator.hintOn = document.getElementById("navigator-hint-toggle").checked;
+        this.navigator.history = [];
+
+        // decide reachability 
+        const startGuidance = this.navigatorComputeGuidance(startWord);
+        this.navigator.reachable = startGuidance.reachable;
+
+        this.navigatorRecordStep(startWord, startGuidance);
+        this.plotMagnify(false);
+    }
+
+    // Scatter-plot clicks
+    navigatorStep(word) {
+        if (!this.navigator.active || !this.vecs.has(word)) {
+            return;
+        }
+        const current = this.navigator.history[this.navigator.history.length - 1];
+        // clicking the word you are already standing on is useless
+        if (current && current.word === word) {
+            return;
+        }
+        // only allow jumping to an actual nearest word of the current selected word
+        const reachableNeighbors = current
+            ? (this.nearestWords.get(current.word) || []).slice(0, this.NAVIGATOR_NEIGHBOR_COUNT)
+            : [];
+        if (current && !reachableNeighbors.includes(word)) {
+            return;
+        }
+        const guidance = this.navigatorComputeGuidance(word);
+        this.navigatorRecordStep(word, guidance);
+    }
+
+    // Update the scatterplot after click 
+    navigatorRecordStep(word, guidance) {
+        const neighbors = (this.nearestWords.get(word) || []).slice(0, this.NAVIGATOR_NEIGHBOR_COUNT);
+        this.scatterWords = this.navigatorSceneFor(word);
+
+        this.navigator.history.push({
+            word,
+            neighbors,
+            remaining: guidance.remaining,
+            nextHint: guidance.nextHint,
+            scatterSnapshot: this.scatterWords.slice()
+        });
+
+        this.plotScatter();
+        this.renderNavigatorPanel();
+    }
+
+    // Undo the most recent step
+    navigatorBack() {
+        if (!this.navigator.active || this.navigator.history.length <= 1) {
+            return;
+        }
+        this.navigator.history.pop();
+        const step = this.navigator.history[this.navigator.history.length - 1];
+        this.scatterWords = step.scatterSnapshot.slice();
+        this.plotScatter();
+        this.renderNavigatorPanel();
+    }
+
+    // Jump back to an recorded step
+    navigatorJumpTo(index) {
+        if (!this.navigator.active || index < 0 || index >= this.navigator.history.length) {
+            return;
+        }
+        this.navigator.history = this.navigator.history.slice(0, index + 1);
+        const step = this.navigator.history[this.navigator.history.length - 1];
+        this.scatterWords = step.scatterSnapshot.slice();
+        this.plotScatter();
+        this.renderNavigatorPanel();
+    }
+
+    // Restart from the original start word with the same target
+    navigatorReset() {
+        if (!this.navigator.active) {
+            return;
+        }
+        this.navigator.history = [];
+        const startGuidance = this.navigatorComputeGuidance(this.navigator.startWord);
+        this.navigator.reachable = startGuidance.reachable;
+        this.navigatorRecordStep(this.navigator.startWord, startGuidance);
+    }
+
+    // Restore the scenes existed before NN started
+    exitNavigator() {
+        if (!this.navigator.active) {
+            return;
+        }
+        if (Array.isArray(this.navigator.savedScatterWords)) {
+            this.scatterWords = this.navigator.savedScatterWords.filter(w => this.vecs.has(w));
+        }
+        this.selectedWord = (this.navigator.savedSelectedWord && this.vecs.has(this.navigator.savedSelectedWord))
+            ? this.navigator.savedSelectedWord
+            : "";
+
+        this.navigator.active = false;
+        this.navigator.history = [];
+        this.navigator.savedScatterWords = null;
+        this.navigator.savedSelectedWord = "";
+
+        this.renderNavigatorPanel();
+        if (this.modelReady) {
+            this.plotScatter();
+        }
+    }
+
+    // Clear navigator state without restoring a scene
+    // Eg. when the surrounding scene is being rebuilt like source switch or clear all
+    resetNavigatorState() {
+        this.navigator.active = false;
+        this.navigator.startWord = "";
+        this.navigator.targetWord = "";
+        this.navigator.reachable = false;
+        this.navigator.history = [];
+        this.navigator.savedScatterWords = null;
+        this.navigator.savedSelectedWord = "";
+        const message = document.getElementById("navigator-message");
+        if (message) {
+            message.classList.remove("navigator-error");
+            message.innerText = "";
+        }
+        this.renderNavigatorPanel();
+    }
+
+    // Toggle hint during the game
+    setNavigatorHint(enabled) {
+        this.navigator.hintOn = enabled;
+        if (this.navigator.active) {
+            this.plotScatter(); // recolor the recommended next word
+            this.renderNavigatorPanel();
+        }
+    }
+
+    navigatorHintWord() {
+        if (!this.navigator.active || !this.navigator.hintOn) {
+            return "";
+        }
+        const current = this.navigator.history[this.navigator.history.length - 1];
+        if (!current || current.word === this.navigator.targetWord) {
+            return "";
+        }
+        return current.nextHint || "";
+    }
+
+    // NavigatorPanel updates
+    renderNavigatorPanel() {
+        const statusElem = document.getElementById("navigator-status");
+        const pathElem = document.getElementById("navigator-path");
+        const backButton = document.getElementById("navigator-back");
+        const resetButton = document.getElementById("navigator-reset");
+        const exitButton = document.getElementById("navigator-exit");
+
+        const active = this.navigator.active;
+        if (backButton) {
+            backButton.disabled = !active || this.navigator.history.length <= 1;
+        }
+        if (resetButton) {
+            resetButton.disabled = !active;
+        }
+        if (exitButton) {
+            exitButton.disabled = !active;
+        }
+
+        if (!statusElem || !pathElem) {
+            return;
+        }
+
+        if (!active) {
+            statusElem.classList.remove("navigator-success");
+            statusElem.innerText = "";
+            pathElem.innerHTML = "";
+            return;
+        }
+
+        const history = this.navigator.history;
+        const current = history[history.length - 1];
+        const stepsTaken = history.length - 1;
+        const target = this.navigator.targetWord;
+
+        // status line
+        if (current.word === target) {
+            statusElem.classList.add("navigator-success");
+            statusElem.innerText =
+                `Reached "${target}" in ${stepsTaken} step${stepsTaken === 1 ? "" : "s"}!`;
+        } else {
+            statusElem.classList.remove("navigator-success");
+            let remainingText;
+            if (current.remaining === Infinity) {
+                remainingText = `"${target}" is not reachable through nearest neighbors — following similarity instead.`;
+            } else {
+                const stepWord = current.remaining === 1 ? "step" : "steps";
+                remainingText = `Shortest path: ${current.remaining} ${stepWord} to "${target}".`;
+            }
+            let line = `You are at "${current.word}". Steps taken: ${stepsTaken}. ${remainingText}`;
+            if (this.navigator.hintOn && current.nextHint) {
+                line += ` Hint: try "${current.nextHint}".`;
+            }
+            statusElem.innerText = line;
+        }
+
+        // breadcrumb path
+        pathElem.innerHTML = "";
+        history.forEach((step, idx) => {
+            if (idx > 0) {
+                const arrow = document.createElement("span");
+                arrow.className = "navigator-arrow";
+                arrow.textContent = " \u2192 ";
+                pathElem.appendChild(arrow);
+            }
+            const isLast = idx === history.length - 1;
+            const node = document.createElement(isLast ? "span" : "a");
+            node.className = "navigator-path-node" + (isLast ? " navigator-current" : "");
+            if (step.word === target) {
+                node.classList.add("navigator-target-node");
+            }
+            node.textContent = step.word;
+            if (!isLast) {
+                node.href = "javascript:void(0)";
+                node.title = "Jump back to this step";
+                node.addEventListener("click", () => this.navigatorJumpTo(idx));
+            }
+            pathElem.appendChild(node);
+        });
     }
 
     // draw lines between selected word in scatter plot and highlighted similarity words in vector plot (#55)

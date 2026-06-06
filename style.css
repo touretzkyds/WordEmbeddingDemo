@@ -362,3 +362,111 @@ output {
     height: 20px;
     border: 2px solid green;
 }
+
+/* NeighborNavigator */
+#navigator-content {
+    width: 94%;
+    margin: 10px 0 0 3%;
+}
+
+#navigator-intro {
+    margin: 0 0 10px;
+    color: #555;
+    max-width: 720px;
+}
+
+.navigator-table {
+    width: 90%;
+    table-layout: fixed;
+}
+
+.navigator-table th,
+.navigator-table td {
+    text-align: center;
+}
+
+.navigator-table input[type="text"] {
+    box-sizing: border-box;
+    width: 90%;
+    padding: 5px;
+    font-size: 15px;
+    color: blue;
+}
+
+#navigator-hint-label {
+    white-space: nowrap;
+    color: #333;
+    cursor: pointer;
+}
+
+#navigator-message {
+    margin: 10px 0 0;
+    min-height: 1.2em;
+    color: #555;
+}
+
+#navigator-message.navigator-error {
+    color: red;
+}
+
+#navigator-status {
+    margin: 10px 0;
+    min-height: 1.2em;
+    font-weight: 600;
+    color: #333;
+}
+
+#navigator-status.navigator-success {
+    color: #2ca02c;
+}
+
+#navigator-path-wrap {
+    margin: 8px 0;
+    line-height: 1.8;
+}
+
+#navigator-path-label {
+    font-weight: 600;
+    margin-right: 6px;
+}
+
+.navigator-path-node {
+    padding: 1px 4px;
+    border-radius: 4px;
+}
+
+a.navigator-path-node {
+    color: #2e7dd7;
+    text-decoration: none;
+}
+
+a.navigator-path-node:hover {
+    background-color: #eef4fc;
+    text-decoration: underline;
+}
+
+.navigator-path-node.navigator-current {
+    background-color: #fdecea;
+    color: #d62728;
+    font-weight: 600;
+}
+
+.navigator-path-node.navigator-target-node {
+    color: #2ca02c;
+}
+
+.navigator-arrow {
+    color: #999;
+}
+
+#navigator-buttons {
+    margin-top: 10px;
+    display: flex;
+    gap: 8px;
+    flex-wrap: wrap;
+}
+
+#navigator-buttons button {
+    padding: 6px 12px;
+    border-radius: 4px;
+}
