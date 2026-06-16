@@ -143,9 +143,12 @@ class Demo {
             reachable: false,        // whether the target is reachable from the starting world
             history: [],             // step stack as {word, neighbors, remaining, nextHint, scatterSnapshot}
             savedScatterWords: null, // to restore the words in the scatter plot after NN finishes
-            savedSelectedWord: ""
+            savedSelectedWord: "",
+            maxSteps: 5,             // default step cap (relaxed when the shortest path is longer)
+            shortest: Infinity       // BFS distance from start to target
         };
         this.NAVIGATOR_NEIGHBOR_COUNT = 10;
+        this.NAVIGATOR_MAX_STEPS = 5;
     }
 
     cloneFeatureWordsPairs(featureWordsPairs) {
@@ -2309,33 +2312,82 @@ class Demo {
         this.navigator.hintOn = document.getElementById("navigator-hint-toggle").checked;
         this.navigator.history = [];
 
-        // decide reachability 
-        const startGuidance = this.navigatorComputeGuidance(startWord);
-        this.navigator.reachable = startGuidance.reachable;
+        // BFS feasibility check up front
+        // verify a path within the default step limit exists
+        const {steps: shortest} = this.navigatorShortestSteps(startWord, targetWord);
+        this.navigator.shortest = shortest;
+        this.navigator.reachable = (shortest !== Infinity);
 
+        if (shortest <= this.NAVIGATOR_MAX_STEPS) {
+            this.navigator.maxSteps = this.NAVIGATOR_MAX_STEPS;
+            const stepWord = shortest === 1 ? "step" : "steps";
+            message.classList.remove("navigator-error");
+            message.innerText =
+                `Shortest path: ${shortest} ${stepWord} from "${startWord}" to "${targetWord}" (limit ${this.NAVIGATOR_MAX_STEPS}).`;
+        } else if (shortest !== Infinity) {
+            // Reachable; but longer than the default limit
+            // relax the limit to the true shortest path
+            this.navigator.maxSteps = shortest;
+            message.classList.add("navigator-error");
+            message.innerText =
+                `Warning: "${targetWord}" needs at least ${shortest} steps from "${startWord}", more than the usual ${this.NAVIGATOR_MAX_STEPS}. Step limit relaxed to ${shortest}.`;
+        } else {
+            // Unreachable over the nearest-neighbor graph; lift the limit (similarity hints only, as a fallback)
+            this.navigator.maxSteps = Infinity;
+            message.classList.add("navigator-error");
+            message.innerText =
+                `Warning: "${targetWord}" is not reachable from "${startWord}" through nearest neighbors. Explore freely; hints will follow similarity.`;
+        }
+
+        const startGuidance = this.navigatorComputeGuidance(startWord);
         this.navigatorRecordStep(startWord, startGuidance);
         this.plotMagnify(false);
     }
 
-    // Scatter-plot clicks
-    navigatorStep(word) {
+    // Select a word from the column that lists neighbors of history[baseIndex]
+    // Stepback to that column, delete columns to the right, and step to that word
+    navigatorSelectFrom(baseIndex, word) {
         if (!this.navigator.active || !this.vecs.has(word)) {
             return;
         }
-        const current = this.navigator.history[this.navigator.history.length - 1];
+        const history = this.navigator.history;
+        if (baseIndex < 0 || baseIndex >= history.length) {
+            return;
+        }
+        const base = history[baseIndex];
         // clicking the word you are already standing on is useless
-        if (current && current.word === word) {
+        if (base.word === word) {
             return;
         }
-        // only allow jumping to an actual nearest word of the current selected word
-        const reachableNeighbors = current
-            ? (this.nearestWords.get(current.word) || []).slice(0, this.NAVIGATOR_NEIGHBOR_COUNT)
-            : [];
-        if (current && !reachableNeighbors.includes(word)) {
+        // only allow jumping to an actual nearest word of the base word
+        const reachableNeighbors = (this.nearestWords.get(base.word) || [])
+            .slice(0, this.NAVIGATOR_NEIGHBOR_COUNT);
+        if (!reachableNeighbors.includes(word)) {
             return;
         }
+        // enforce the step limit
+        if (baseIndex + 1 > this.navigator.maxSteps) {
+            const message = document.getElementById("navigator-message");
+            if (message) {
+                message.classList.add("navigator-error");
+                message.innerText = `Step limit reached (${this.navigator.maxSteps}). Use Back or Reset to try another path.`;
+            }
+            return;
+        }
+        // drop the picked word and everything after it, then step forward
+        this.navigator.history = history.slice(0, baseIndex + 1);
         const guidance = this.navigatorComputeGuidance(word);
         this.navigatorRecordStep(word, guidance);
+    }
+
+    // Scatter-plot clicks select from the latest column
+    navigatorStep(word) {
+        this.navigatorSelectFrom(this.navigator.history.length - 1, word);
+    }
+
+    // Miller-column clicks select from an arbitrary column
+    navigatorColumnSelect(baseIndex, word) {
+        this.navigatorSelectFrom(baseIndex, word);
     }
 
     // Update the scatterplot after click 
@@ -2451,6 +2503,97 @@ class Demo {
         return current.nextHint || "";
     }
 
+    // Miller-column: start column and additional columns for each new word visited 
+    renderNavigatorColumns() {
+        const container = document.getElementById("navigator-columns");
+        if (!container) {
+            return;
+        }
+        container.innerHTML = "";
+        if (!this.navigator.active || this.navigator.history.length === 0) {
+            return;
+        }
+
+        const history = this.navigator.history;
+        const target = this.navigator.targetWord;
+        const hintOn = this.navigator.hintOn;
+        const stepsTaken = history.length - 1;
+        const reachedGoal = history[history.length - 1].word === target;
+
+        // Starting column showing the start work
+        container.appendChild(this.buildNavigatorStartColumn(history[0].word, target));
+
+        // One neighbor column per word in the path
+        for (let j = 0; j < history.length; j++) {
+            const isTrailing = (j === history.length - 1);
+            if (isTrailing && (reachedGoal || stepsTaken >= this.navigator.maxSteps)) {
+                break; // can't move further once reached the goal or the step limit is hit
+            }
+            const base = history[j];
+            const selectedWord = isTrailing ? null : history[j + 1].word;
+            const hintWord = (hintOn && base.word !== target) ? base.nextHint : null;
+            container.appendChild(
+                this.buildNavigatorNeighborColumn(j, base, selectedWord, hintWord, target)
+            );
+        }
+    }
+
+    buildNavigatorStartColumn(word, target) {
+        const column = document.createElement("div");
+        column.className = "navigator-column navigator-start-column";
+
+        const header = document.createElement("div");
+        header.className = "navigator-column-header";
+        header.textContent = "Start";
+        column.appendChild(header);
+
+        const list = document.createElement("div");
+        list.className = "navigator-column-list";
+        const cell = document.createElement("div");
+        cell.className = "navigator-column-item navigator-selected navigator-start-word";
+        if (word === target) {
+            cell.classList.add("navigator-target-node");
+        }
+        cell.textContent = word;
+        list.appendChild(cell);
+        column.appendChild(list);
+        return column;
+    }
+
+    buildNavigatorNeighborColumn(baseIndex, base, selectedWord, hintWord, target) {
+        const column = document.createElement("div");
+        column.className = "navigator-column";
+
+        const header = document.createElement("div");
+        header.className = "navigator-column-header";
+        header.textContent = `Neighbors of "${base.word}"`;
+        column.appendChild(header);
+
+        const list = document.createElement("div");
+        list.className = "navigator-column-list";
+
+        for (const neighbor of base.neighbors) {
+            const item = document.createElement("button");
+            item.type = "button";
+            item.className = "navigator-column-item";
+            if (neighbor === selectedWord) {
+                item.classList.add("navigator-selected");
+            }
+            if (neighbor === target) {
+                item.classList.add("navigator-target-node");
+            }
+            if (neighbor === hintWord) {
+                item.classList.add("navigator-hint");
+            }
+            item.textContent = neighbor;
+            item.addEventListener("click", () => this.navigatorColumnSelect(baseIndex, neighbor));
+            list.appendChild(item);
+        }
+
+        column.appendChild(list);
+        return column;
+    }
+
     // NavigatorPanel updates
     renderNavigatorPanel() {
         const statusElem = document.getElementById("navigator-status");
@@ -2469,6 +2612,8 @@ class Demo {
         if (exitButton) {
             exitButton.disabled = !active;
         }
+
+        this.renderNavigatorColumns();
 
         if (!statusElem || !pathElem) {
             return;
