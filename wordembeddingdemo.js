@@ -144,11 +144,11 @@ class Demo {
             history: [],             // step stack as {word, neighbors, remaining, nextHint, scatterSnapshot}
             savedScatterWords: null, // to restore the words in the scatter plot after NN finishes
             savedSelectedWord: "",
-            maxSteps: 5,             // default step cap (relaxed when the shortest path is longer)
+            maxSteps: 7,             // default step cap (relaxed when the shortest path is longer)
             shortest: Infinity       // BFS distance from start to target
         };
         this.NAVIGATOR_NEIGHBOR_COUNT = 10;
-        this.NAVIGATOR_MAX_STEPS = 5;
+        this.NAVIGATOR_MAX_STEPS = 7;
     }
 
     cloneFeatureWordsPairs(featureWordsPairs) {
