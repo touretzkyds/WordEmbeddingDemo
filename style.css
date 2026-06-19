@@ -568,6 +568,6 @@ button.navigator-column-item:hover {
     outline-offset: -2px;
 }
 
-.navigator-start-word {
-    cursor: default;
+button.navigator-start-word:hover {
+    background-color: #eef4fc;
 }

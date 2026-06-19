@@ -2550,12 +2550,15 @@ class Demo {
 
         const list = document.createElement("div");
         list.className = "navigator-column-list";
-        const cell = document.createElement("div");
+        const cell = document.createElement("button");
+        cell.type = "button";
         cell.className = "navigator-column-item navigator-selected navigator-start-word";
         if (word === target) {
             cell.classList.add("navigator-target-node");
         }
         cell.textContent = word;
+        cell.title = "Jump back to start";
+        cell.addEventListener("click", () => this.navigatorJumpTo(0));
         list.appendChild(cell);
         column.appendChild(list);
         return column;
