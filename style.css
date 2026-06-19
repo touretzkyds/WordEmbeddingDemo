@@ -241,6 +241,33 @@ body {
     position: relative;
 }
 
+#navigator-scatter-banner {
+    position: absolute;
+    top: 0;
+    left: 3%;
+    z-index: 500;
+    pointer-events: none;
+    box-sizing: border-box;
+    max-width: 90%;
+    padding: 4px 10px;
+    border: 1px solid #ddd;
+    border-radius: 4px;
+    background-color: rgba(242, 242, 242, 0.92);
+    text-align: left;
+    line-height: 1.3;
+    color: #555;
+}
+
+.navigator-scatter-banner-title {
+    font-weight: 600;
+    color: #333;
+}
+
+.navigator-scatter-banner-hint {
+    margin-top: 2px;
+    font-size: 12px;
+}
+
 #scatter-overlay {
     position: absolute;
     z-index: 1000; /* bring to front */

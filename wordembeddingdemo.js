@@ -815,7 +815,11 @@ class Demo {
 
         // always make new plot (#9)
         // replotting scatter3d produces ugly error (#10)
-        Plotly.newPlot("plotly-scatter", data, layout);
+        Plotly.newPlot("plotly-scatter", data, layout).then(() => {
+            if (this.navigator.active) {
+                this.updateNavigatorScatterBanner();
+            }
+        });
 
         let plotly_scatter = document.getElementById("plotly-scatter");
         // remove old listeners before rebinding to avoid duplicate click toggles
@@ -2354,6 +2358,44 @@ class Demo {
         const startGuidance = this.navigatorComputeGuidance(startWord);
         this.navigatorRecordStep(startWord, startGuidance);
         this.plotMagnify(false);
+        this.updateNavigatorScatterBanner();
+    }
+
+    updateNavigatorScatterBanner() {
+        const banner = document.getElementById("navigator-scatter-banner");
+        if (!banner) {
+            return;
+        }
+        banner.hidden = !this.navigator.active;
+        if (!this.navigator.active) {
+            return;
+        }
+        requestAnimationFrame(() => this.positionNavigatorScatterBanner());
+    }
+
+    // Update the banner position to align with the title
+    positionNavigatorScatterBanner() {
+        const banner = document.getElementById("navigator-scatter-banner");
+        const parent = document.getElementById("plotly-scatter");
+        if (!banner || !parent || banner.hidden) {
+            return;
+        }
+        const titleEl = parent.querySelector(".g-gtitle text");
+        if (!titleEl) {
+            banner.style.top = "8px";
+            return;
+        }
+        const rectTitle = titleEl.getBoundingClientRect();
+        const rectParent = parent.getBoundingClientRect();
+        const titleCenterY = (rectTitle.top - rectParent.top) + rectTitle.height / 2;
+        const bannerTitle = banner.querySelector(".navigator-scatter-banner-title");
+        const bannerRect = banner.getBoundingClientRect();
+        let alignOffset = bannerRect.height / 2;
+        if (bannerTitle) {
+            const bannerTitleRect = bannerTitle.getBoundingClientRect();
+            alignOffset = (bannerTitleRect.top - bannerRect.top) + bannerTitleRect.height / 2;
+        }
+        banner.style.top = `${Math.max(0, Math.round(titleCenterY - alignOffset))}px`;
     }
 
     // Select a word from the column that lists neighbors of history[baseIndex]
@@ -2475,6 +2517,7 @@ class Demo {
         if (this.modelReady) {
             this.plotScatter();
         }
+        this.updateNavigatorScatterBanner();
     }
 
     // Clear navigator state without restoring a scene
@@ -2493,6 +2536,7 @@ class Demo {
             message.innerText = "";
         }
         this.renderNavigatorPanel();
+        this.updateNavigatorScatterBanner();
     }
 
     // Toggle hint during the game
@@ -3120,5 +3164,6 @@ window.addEventListener('resize', function() {
     demo.initSimilarityLines();
     if (demo.navigator.active) {
         demo.updateNavigatorPathLines();
+        demo.updateNavigatorScatterBanner();
     }
 });
