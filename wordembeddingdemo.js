@@ -149,6 +149,7 @@ class Demo {
         };
         this.NAVIGATOR_NEIGHBOR_COUNT = 10;
         this.NAVIGATOR_MAX_STEPS = 7;
+        this.NAVIGATOR_PATH_LINE_TEXT_GAP = 4; // pixel gap between path lines and word
     }
 
     cloneFeatureWordsPairs(featureWordsPairs) {
@@ -361,6 +362,16 @@ class Demo {
             navigatorHintToggle.addEventListener("change", (event) => {
                 this.setNavigatorHint(event.target.checked);
             });
+        }
+
+        const navigatorColumns = document.getElementById("navigator-columns");
+        if (navigatorColumns && navigatorColumns.dataset.boundScroll !== "true") {
+            navigatorColumns.addEventListener("scroll", () => {
+                if (this.navigator.active) {
+                    this.updateNavigatorPathLines();
+                }
+            });
+            navigatorColumns.dataset.boundScroll = "true";
         }
 
         const plotly_scatter = document.getElementById("plotly-scatter");
@@ -2510,6 +2521,7 @@ class Demo {
         if (!container) {
             return;
         }
+        this.removeNavigatorPathLines();
         container.innerHTML = "";
         if (!this.navigator.active || this.navigator.history.length === 0) {
             return;
@@ -2537,6 +2549,73 @@ class Demo {
                 this.buildNavigatorNeighborColumn(j, base, selectedWord, hintWord, target)
             );
         }
+        requestAnimationFrame(() => this.updateNavigatorPathLines());
+    }
+   
+    // Add path lines
+
+    measureNavigatorTextWidth(text, style) {
+        if (!this._navigatorMeasureCanvas) {
+            this._navigatorMeasureCanvas = document.createElement("canvas");
+        }
+        const ctx = this._navigatorMeasureCanvas.getContext("2d");
+        ctx.font = `${style.fontWeight} ${style.fontSize} ${style.fontFamily}`;
+        return ctx.measureText(text).width;
+    }
+
+    getNavigatorTextAnchor(element, side, containerEl) {
+        const containerRect = containerEl.getBoundingClientRect();
+        const rect = element.getBoundingClientRect();
+        const style = window.getComputedStyle(element);
+        const textWidth = this.measureNavigatorTextWidth(element.textContent.trim(), style);
+        const paddingLeft = parseFloat(style.paddingLeft) || 0;
+        const gap = this.NAVIGATOR_PATH_LINE_TEXT_GAP; // add gap to look better
+        const x = rect.left - containerRect.left + paddingLeft +
+            (side === "end" ? textWidth + gap : -gap);
+        const y = rect.top - containerRect.top + rect.height / 2;
+        return {x, y};
+    }
+
+    removeNavigatorPathLines() {
+        const svg = document.getElementById("navigator-path-overlay");
+        if (svg) {
+            svg.innerHTML = "";
+        }
+    }
+
+    updateNavigatorPathLines() {
+        const wrap = document.getElementById("navigator-columns-wrap");
+        const svg = document.getElementById("navigator-path-overlay");
+        if (!wrap || !svg) {
+            return;
+        }
+        svg.innerHTML = "";
+        if (!this.navigator.active || this.navigator.history.length < 2) {
+            return;
+        }
+
+        svg.setAttribute("width", String(wrap.clientWidth));
+        svg.setAttribute("height", String(wrap.clientHeight));
+
+        const stepCount = this.navigator.history.length;
+        for (let i = 0; i < stepCount - 1; i++) {
+            const fromEl = wrap.querySelector(`[data-nav-path-step="${i}"]`);
+            const toEl = wrap.querySelector(`[data-nav-path-step="${i + 1}"]`);
+            if (!fromEl || !toEl) {
+                continue;
+            }
+            const from = this.getNavigatorTextAnchor(fromEl, "end", wrap);
+            const to = this.getNavigatorTextAnchor(toEl, "start", wrap);
+            const line = document.createElementNS("http://www.w3.org/2000/svg", "line");
+            line.setAttribute("x1", String(from.x));
+            line.setAttribute("y1", String(from.y));
+            line.setAttribute("x2", String(to.x));
+            line.setAttribute("y2", String(to.y));
+            line.setAttribute("stroke", "#d62728");
+            line.setAttribute("stroke-width", "2");
+            line.setAttribute("stroke-opacity", "0.75");
+            svg.appendChild(line);
+        }
     }
 
     buildNavigatorStartColumn(word, target) {
@@ -2558,6 +2637,7 @@ class Demo {
         }
         cell.textContent = word;
         cell.title = "Jump back to start";
+        cell.dataset.navPathStep = "0";
         cell.addEventListener("click", () => this.navigatorJumpTo(0));
         list.appendChild(cell);
         column.appendChild(list);
@@ -2582,6 +2662,7 @@ class Demo {
             item.className = "navigator-column-item";
             if (neighbor === selectedWord) {
                 item.classList.add("navigator-selected");
+                item.dataset.navPathStep = String(baseIndex + 1);
             }
             if (neighbor === target) {
                 item.classList.add("navigator-target-node");
@@ -3037,4 +3118,7 @@ window.addEventListener('resize', function() {
     // reset leader lines
     demo.removeSimilarityLines(); 
     demo.initSimilarityLines();
+    if (demo.navigator.active) {
+        demo.updateNavigatorPathLines();
+    }
 });

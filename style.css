@@ -491,9 +491,26 @@ a.navigator-path-node:hover {
 }
 
 /* Miller-column for NeighborNavigator */
-#navigator-columns {
+#navigator-columns-wrap {
+    position: relative;
     width: 90%;
     margin-left: 3%;
+}
+
+#navigator-path-overlay {
+    position: absolute;
+    top: 0;
+    left: 0;
+    pointer-events: none;
+    overflow: visible;
+    z-index: 2;
+}
+
+#navigator-columns {
+    position: relative;
+    z-index: 1;
+    width: 100%;
+    margin-left: 0;
     display: flex;
     gap: 8px;
     overflow-x: auto;
@@ -504,6 +521,8 @@ a.navigator-path-node:hover {
 .navigator-column {
     flex: 0 0 auto;
     min-width: 150px;
+    position: relative;
+    z-index: 1;
     border: 1px solid #ddd;
     border-radius: 6px;
     background-color: #fafafa;
