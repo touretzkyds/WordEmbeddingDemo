@@ -650,10 +650,11 @@ class Demo {
 
         // color points by type with priority (#12)
         const color = plotWords.map(word =>
-            // NeighborNavigator colors are the priority
-            (navActive && word === navTarget) ? "#2ca02c"   // green goal
-            : (navActive && word === navCurrent) ? "red"     // current standing
-            : (navActive && word === navHint) ? "#ff7f0e"    // suggested next word
+            // Neighbor Navigator colors take priority while a game is active
+            (navActive && word === navTarget) ? "#2ca02c"   // target: green
+            : (navActive && word === navCurrent) ? "red"    // current word: red
+            : (navActive && word === navHint) ? "#ff7f0e"   // hint: orange
+            : navActive ? "#1f77b4"                         // other neighbors: blue
             : (word === this.selectedWord) ? "red" // selected word has highest priority
             : (word === this.analogy.y) ? "pink"
             : (word === this.analogy.Wstar) ? "lime"
