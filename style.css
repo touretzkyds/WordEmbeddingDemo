@@ -365,29 +365,44 @@ output {
 
 /* NeighborNavigator */
 #navigator-content {
-    width: 94%;
-    margin: 10px 0 0 3%;
+    margin: 10px 0 0;
 }
 
 #navigator-intro {
-    margin: 0 0 10px;
+    margin: 0 0 10px 3%;
     color: #555;
-    max-width: 720px;
+    max-width: none;
 }
 
 .navigator-table {
-    width: 90%;
     table-layout: fixed;
 }
 
-.navigator-table th,
-.navigator-table td {
+#navigator-details .navigator-table th,
+#navigator-details .navigator-table td {
     text-align: center;
+}
+
+#navigator-details .navigator-table th:nth-child(1),
+#navigator-details .navigator-table td:nth-child(1),
+#navigator-details .navigator-table th:nth-child(2),
+#navigator-details .navigator-table td:nth-child(2) {
+    width: 30%;
+}
+
+#navigator-details .navigator-table th:nth-child(3),
+#navigator-details .navigator-table td:nth-child(3) {
+    width: 30%;
+}
+
+#navigator-details .navigator-table th:nth-child(4),
+#navigator-details .navigator-table td:nth-child(4) {
+    width: 10%;
 }
 
 .navigator-table input[type="text"] {
     box-sizing: border-box;
-    width: 90%;
+    width: 100%;
     padding: 5px;
     font-size: 15px;
     color: blue;
@@ -400,7 +415,8 @@ output {
 }
 
 #navigator-message {
-    margin: 10px 0 0;
+    width: 90%;
+    margin: 10px 0 0 3%;
     min-height: 1.2em;
     color: #555;
 }
@@ -410,7 +426,8 @@ output {
 }
 
 #navigator-status {
-    margin: 10px 0;
+    width: 90%;
+    margin: 10px 0 10px 3%;
     min-height: 1.2em;
     font-weight: 600;
     color: #333;
@@ -421,7 +438,8 @@ output {
 }
 
 #navigator-path-wrap {
-    margin: 8px 0;
+    width: 90%;
+    margin: 8px 0 8px 3%;
     line-height: 1.8;
 }
 
@@ -460,7 +478,8 @@ a.navigator-path-node:hover {
 }
 
 #navigator-buttons {
-    margin-top: 10px;
+    width: 90%;
+    margin: 10px 0 0 3%;
     display: flex;
     gap: 8px;
     flex-wrap: wrap;
@@ -473,6 +492,8 @@ a.navigator-path-node:hover {
 
 /* Miller-column for NeighborNavigator */
 #navigator-columns {
+    width: 90%;
+    margin-left: 3%;
     display: flex;
     gap: 8px;
     overflow-x: auto;
