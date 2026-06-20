@@ -1333,7 +1333,9 @@ class Demo {
         // Can consider to update this.vectorWords to the 4 words from OddOneOut in the future
 
         message.classList.remove("odd-one-out-error");
-        message.innerText = `Odd one out: ${outlier.word} (avg cosine: ${outlier.score.toFixed(3)})`;
+        const clusterAvg = this.computeClusterAverageCosine(outlier.index, similarityMatrix);
+        message.innerText =
+            `Odd one out: ${outlier.word} (avg cosine: ${outlier.score.toFixed(3)}; cluster avg: ${clusterAvg.toFixed(3)})`;
         result.innerText = outlier.word;
         this.renderOddOneOutPlot(points, words, outlier.index, similarityMatrix, outlier.scores, linkMetrics);
     }
@@ -1367,33 +1369,30 @@ class Demo {
         return { index, word: words[index], score: scores[index], scores };
     }
 
-    projectOddOneOutTo2D(similarityMatrix) {
-        const n = similarityMatrix.length;
-        if (n === 0) {
-            return {points: [], linkMetrics: new Map()};
+    computeClusterAverageCosine(outlierIndex, similarityMatrix) {
+        const clusterIndices = [];
+        for (let i = 0; i < similarityMatrix.length; i++) {
+            if (i !== outlierIndex) {
+                clusterIndices.push(i);
+            }
+        }
+        if (clusterIndices.length < 2) {
+            return 0;
         }
 
-        const springConfig = {
-            minDistance: 0.5,
-            maxDistance: 2.2,
-            minStrength: 0.08,
-            maxStrength: 0.42,
-            distanceExponent: 1.9,
-            strengthExponent: 2.1,
-            similarityEpsilon: 1e-6,
-            chargeStrength: -0.6,
-            collideRadius: 0.25,
-            iterations: 360,
-            seed: 0x9e3779b9 // use fixed seed so that layout is determined, but the orientation is different
-        };
+        let total = 0;
+        let count = 0;
+        for (let a = 0; a < clusterIndices.length; a++) {
+            for (let b = a + 1; b < clusterIndices.length; b++) {
+                total += similarityMatrix[clusterIndices[a]][clusterIndices[b]];
+                count++;
+            }
+        }
+        return total / count;
+    }
 
-        // Deterministic seed
-        // The arbitrary-axes appearance is added later by a random rigid transform
-        const nodes = new Array(n).fill(0).map((_, i) => {
-            const angle = (2 * Math.PI * i) / n;
-            return {id: i, x: Math.cos(angle), y: Math.sin(angle)};
-        });
-
+    buildOddOneOutLinks(similarityMatrix, springConfig) {
+        const n = similarityMatrix.length;
         const pairSimilarities = [];
         for (let i = 0; i < n; i++) {
             for (let j = i + 1; j < n; j++) {
@@ -1436,9 +1435,55 @@ class Demo {
                 });
             }
         }
+        return {links, pairSimilarities};
+    }
+
+    getOddOneOutSquareStarts(n = 4) {
+        const TL = {x: -1, y:1};
+        const TR = {x: 1, y:1};
+        const BL = {x: -1, y: -1};
+        const BR = {x: 1, y: -1};
+
+        // Three square topologies
+        const cornerAssignments = [
+            [TL, TR, BR, BL], // A-B, D-C
+            [TL, BR, TR, BL], // A-C, D-B
+            [TL, BL, TR, BR]  // A-C, B-D
+        ];
+
+        const starts = [];
+        for (const corners of cornerAssignments) {
+            const nodes = corners.slice(0, n).map((corner, id) => ({
+                id,
+                x:corner.x,
+                y:corner.y
+            }));
+            starts.push(nodes);
+            starts.push(nodes.map(node => ({
+                id: node.id,
+                x: -node.y,
+                y: node.x
+            })));
+        }
+        return starts;
+    }
+
+    runOddOneOutSpringSimulation(initialNodes, linkTemplate, springConfig, startIndex) {
+        const nodes = initialNodes.map(node => ({
+            id: node.id,
+            x:node.x,
+            y:node.y
+        }));
+        const links = linkTemplate.map(link => ({
+            source: link.source,
+            target: link.target,
+            similarity: link.similarity,
+            targetDistance: link.targetDistance,
+            springStrength: link.springStrength
+        }));
 
         const simulation = d3.forceSimulation(nodes)
-            .randomSource(this.makeSeededRandom(springConfig.seed))
+            .randomSource(this.makeSeededRandom(springConfig.seed + startIndex))
             .force("link", d3.forceLink(links)
                 .id(d => d.id)
                 .distance(link => link.targetDistance)
@@ -1447,6 +1492,8 @@ class Demo {
             .force("charge", d3.forceManyBody().strength(springConfig.chargeStrength))
             .force("center", d3.forceCenter(0, 0))
             .force("collide", d3.forceCollide(springConfig.collideRadius))
+            .alpha(springConfig.alpha)
+            .alphaDecay(springConfig.alphaDecay)
             .stop();
 
         for (let i = 0; i < springConfig.iterations; i++) {
@@ -1454,12 +1501,144 @@ class Demo {
         }
         simulation.stop();
 
-        const linkMetrics = this.computeOddOneOutLinkMetrics(links);
-
-        // Distances/ordering are now fixed; randomize only the global orientation for display.
         const points = nodes.map(node => ({x: node.x, y: node.y}));
-        this.applyRandomDisplayTransform(points);
+        const linkMetrics = this.computeOddOneOutLinkMetrics(links);
         return {points, linkMetrics};
+    }
+
+    rankValues(values) {
+        const indexed = values.map((value, index) => ({value, index}));
+        indexed.sort((a, b) => a.value - b.value);
+
+        const ranks = new Array(values.length);
+        let start = 0;
+        while (start < indexed.length) {
+            let end = start;
+            while (end + 1 < indexed.length && indexed[end + 1].value === indexed[start].value) {
+                end++;
+            }
+            const averageRank = (start + end + 2) / 2;
+            for (let i = start; i <= end; i++) {
+                ranks[indexed[i].index] = averageRank;
+            }
+            start = end + 1;
+        }
+        return ranks;
+    }
+    // Calculate Pearson correlation coefficient
+    pearsonCorrelation(x, y) {
+        const n = x.length;
+        if (n < 2) {
+            return 0;
+        }
+        const meanX = x.reduce((sum, value) => sum + value, 0) / n;
+        const meanY = y.reduce((sum, value) => sum + value, 0) / n;
+        let numerator = 0;
+        let denominatorX = 0;
+        let denominatorY = 0;
+        for (let i = 0; i < n; i++) {
+            const dx = x[i] - meanX;
+            const dy = y[i] - meanY;
+            numerator += dx * dy;
+            denominatorX += dx * dx;
+            denominatorY += dy * dy;
+        }
+        if (denominatorX === 0 || denominatorY === 0) {
+            return 0;
+        }
+        return numerator / Math.sqrt(denominatorX * denominatorY);
+    }
+    
+    // Calculate Spearman correlation coefficient to test the right ranking for the best layout
+    spearmanCorrelation(x, y) {
+        return this.pearsonCorrelation(this.rankValues(x), this.rankValues(y));
+    }
+
+    scoreOddOneOutLayout(points, similarityMatrix, linkTemplate) {
+        const similarities = [];
+        const negDistances = [];
+        let stress = 0;
+
+        for (let i = 0; i < points.length; i++) {
+            for (let j = i + 1; j < points.length; j++) {
+                const dx = points[i].x - points[j].x;
+                const dy = points[i].y - points[j].y;
+                const distance = Math.sqrt(dx * dx + dy * dy);
+                similarities.push(similarityMatrix[i][j]);
+                negDistances.push(-distance);
+
+                const link = linkTemplate.find(candidate =>
+                    (candidate.source === i && candidate.target === j) ||
+                    (candidate.source === j && candidate.target === i)
+                );
+                if (link) {
+                    const delta = distance - link.targetDistance;
+                    stress += delta * delta;
+                }
+            }
+        }
+
+        return {
+            spearman: this.spearmanCorrelation(similarities, negDistances),
+            pearson: this.pearsonCorrelation(similarities, negDistances),
+            stress
+        };
+    }
+
+    compareOddOneOutLayoutScores(candidateScore, bestScore) {
+        if (candidateScore.spearman !== bestScore.spearman) {
+            return candidateScore.spearman > bestScore.spearman ? 1 : -1;
+        }
+        if (candidateScore.pearson !== bestScore.pearson) {
+            return candidateScore.pearson > bestScore.pearson ? 1 : -1;
+        }
+        if (candidateScore.stress !== bestScore.stress) {
+            return candidateScore.stress < bestScore.stress ? 1 : -1;
+        }
+        return 0;
+    }
+
+    projectOddOneOutTo2D(similarityMatrix) {
+        const n = similarityMatrix.length;
+        if (n === 0) {
+            return {points: [], linkMetrics: new Map()};
+        }
+
+        const springConfig = {
+            minDistance: 0.5,
+            maxDistance: 2.2,
+            minStrength: 0.08,
+            maxStrength: 0.42,
+            distanceExponent: 1.2,
+            strengthExponent: 1.3,
+            similarityEpsilon: 1e-6,
+            chargeStrength: -0.25,
+            collideRadius: 0.25,
+            iterations: 550,
+            alpha: 0.3,
+            alphaDecay: 0.01,
+            seed: 0x9e3779b9
+        };
+
+        const {links: linkTemplate} = this.buildOddOneOutLinks(similarityMatrix, springConfig);
+        const starts = this.getOddOneOutSquareStarts(n);
+        let bestLayout = null;
+        starts.forEach((initialNodes, startIndex) => {
+            const {points, linkMetrics} = this.runOddOneOutSpringSimulation(
+                initialNodes,
+                linkTemplate,
+                springConfig,
+                startIndex
+            );
+            const score = this.scoreOddOneOutLayout(points, similarityMatrix, linkTemplate);
+            const candidate = {points, linkMetrics, score};
+            if (!bestLayout || this.compareOddOneOutLayoutScores(candidate.score, bestLayout.score) > 0) {
+                bestLayout = candidate;
+            }
+        });
+
+        this.applyRandomDisplayTransform(bestLayout.points);
+        return {points: bestLayout.points, linkMetrics: bestLayout.linkMetrics};
     }
 
     // deterministic PRNG
