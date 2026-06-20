@@ -1335,7 +1335,7 @@ class Demo {
         message.classList.remove("odd-one-out-error");
         const clusterAvg = this.computeClusterAverageCosine(outlier.index, similarityMatrix);
         message.innerText =
-            `Odd one out: ${outlier.word} (avg cosine: ${outlier.score.toFixed(3)}; cluster avg: ${clusterAvg.toFixed(3)})`;
+            `Odd One Out: ${outlier.word} (avg odd one cosine: ${outlier.score.toFixed(3)}); avg in-group cosine: ${clusterAvg.toFixed(3)}`;
         result.innerText = outlier.word;
         this.renderOddOneOutPlot(points, words, outlier.index, similarityMatrix, outlier.scores, linkMetrics);
     }
