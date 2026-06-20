@@ -505,6 +505,20 @@ multiplications plus 299 additions), while Euclidean distance requires
 product is exactly what a neuron in a neural net computes: it takes
 the dot product of its weight vector with its input vector.<p>
 
+<h5> Additional Panels </h5>
+
+The Odd One Out panel demonstrates how cosine similarity can be used
+to find which of four words doesn't fit with the others.  For each
+word, we compute its average cosine similarity to the other three
+words.  The word with the lowest average is the "odd one".  This
+feature was inspired by the Word2vec tutorial of Radim Řehůřek (2014).<p/>
+
+The Neighbor Navigator panel offers a fun challenge: finding a path
+from a start word to a target word, where each step must be one of a
+word's 10 nearest neighbors, as determined by cosine similarity.  This
+feature was inspired by the Word2Vec4Kids application of Wiatrek,
+Verma, and Martin (2025).<p/>
+
 <h5> How Word Embeddings Are Created </h5>
 
 There are a variety of algorithms for constructing word embeddings.
@@ -619,6 +633,16 @@ embeddings.  The context table U can be discarded.<p/>
   <li> <a href="https://www.tensorflow.org/text/guide/word_embeddings">TensorFlow word embeddings</a>.
 
   <li> Google's <a href="https://research.google.com/semantris/">Semantris</a> game, which uses word embeddings.
+
+  <li> <a href="https://web.archive.org/web/20151222163627/https://rare-technologies.com/word2vec-tutorial/">Word2vec
+  Tutorial</a> by Radim Řehůřek.  RaRe Machine Learning Blog, February
+  2, 2014.  Archived at Archive.org.
+
+  <li> <a href="https://ojs.aaai.org/index.php/AAAI/article/view/35197">Word2Vec4Kids:
+  Interactive Challenges to Introduce Middle School Students to Word
+  Embeddings</a>, by Nathan Wiatrek, Yash Verma, and Fred
+  Martin. Proceedings of the AAAI Conference on Artificial
+  Intelligence, 39(28):29228–29235, 2025.
 
   <li> GitHub repository for this <a href="https://github.com/touretzkyds/WordEmbeddingDemo">WordEmbeddingDemo</a>.
 
