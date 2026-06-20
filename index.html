@@ -41,6 +41,10 @@
 
 <div id="plots-container">
     <div id="plotly-scatter"> 
+        <div id="navigator-scatter-banner" hidden aria-live="polite">
+            <div class="navigator-scatter-banner-title">Neighbor Navigator running</div>
+            <div class="navigator-scatter-banner-hint">Scroll down to use the panel below.</div>
+        </div>
         <div id="scatter-overlay"></div>
     </div>
     <div id="plotly-magnify"></div>
@@ -110,40 +114,6 @@
             </tr>
 		</table>
     </form>
-
-</details>
-
-<!-- Odd One Out -->
-<details id="odd-one-out-details">
-    <summary>Odd One Out</summary>
-
-    <div id="odd-one-out-content">
-        <div id="odd-one-out-controls">
-            <!-- autocomplete off to disable Firefox from saving form entries -->
-            <form id="odd-one-out-form" action="javascript:demo.processOddOneOut()" autocomplete="off">
-                <table class="analogy-table odd-one-out-table">
-                    <tr>
-                        <th>Word 1</th>
-                        <th>Word 2</th>
-                        <th>Word 3</th>
-                        <th>Word 4</th>
-                        <th>Result</th>
-                        <th></th>
-                    </tr>
-                    <tr>
-                        <td><input id="odd-word-0" type="text" value="breakfast"></td>
-                        <td><input id="odd-word-1" type="text" value="cereal"></td>
-                        <td><input id="odd-word-2" type="text" value="lunch"></td>
-                        <td><input id="odd-word-3" type="text" value="dinner"></td>
-                        <td><output id="odd-one-out-result">----</output></td>
-                        <td><button class="analogy-button" type="submit">Submit</button></td>
-                    </tr>
-                </table>
-            </form>
-            <div id="odd-one-out-message" aria-live="polite"></div>
-        </div>
-        <div id="odd-one-out-plot"></div>
-    </div>
 
 </details>
 
@@ -347,6 +317,96 @@
         </div>
 
     </form>
+</details>
+
+<!-- Odd One Out -->
+<details id="odd-one-out-details">
+    <summary>Odd One Out</summary>
+
+    <div id="odd-one-out-content">
+        <div id="odd-one-out-controls">
+            <!-- autocomplete off to disable Firefox from saving form entries -->
+            <form id="odd-one-out-form" action="javascript:demo.processOddOneOut()" autocomplete="off">
+                <table class="analogy-table odd-one-out-table">
+                    <tr>
+                        <th>Word 1</th>
+                        <th>Word 2</th>
+                        <th>Word 3</th>
+                        <th>Word 4</th>
+                        <th>Result</th>
+                        <th></th>
+                    </tr>
+                    <tr>
+                        <td><input id="odd-word-0" type="text" value="breakfast"></td>
+                        <td><input id="odd-word-1" type="text" value="cereal"></td>
+                        <td><input id="odd-word-2" type="text" value="lunch"></td>
+                        <td><input id="odd-word-3" type="text" value="dinner"></td>
+                        <td><output id="odd-one-out-result">----</output></td>
+                        <td><button class="analogy-button" type="submit">Submit</button></td>
+                    </tr>
+                </table>
+            </form>
+            <div id="odd-one-out-message" aria-live="polite"></div>
+        </div>
+        <div id="odd-one-out-plot"></div>
+    </div>
+
+</details>
+
+<!-- NeighborNavigator -->
+<details id="navigator-details">
+    <summary>Neighbor Navigator</summary>
+
+    <div id="navigator-content">
+        <p id="navigator-intro">
+            Pick a start word and a target word, then hop neighbor by neighbor toward the target.<br>
+            Explore in the columns below or by clicking points in the scatter plot above.<br>
+            Click a word in any earlier column to go back to that step.
+       
+        </p>
+
+        <form id="navigator-form" action="javascript:demo.startNavigator()" autocomplete="off">
+            <table class="analogy-table navigator-table">
+                <tr>
+                    <th>Start word</th>
+                    <th>Target word</th>
+                    <th></th>
+                    <th></th>
+                </tr>
+                <tr>
+                    <td><input id="navigator-start" type="text" value="son"></td>
+                    <td><input id="navigator-target" type="text" value="aunt"></td>
+                    <td>
+                        <label id="navigator-hint-label">
+                            <input id="navigator-hint-toggle" type="checkbox">
+                            Show hints
+                        </label>
+                    </td>
+                    <td><button class="analogy-button" type="submit">Submit</button></td>
+                </tr>
+            </table>
+        </form>
+
+        <div id="navigator-message" aria-live="polite"></div>
+
+        <div id="navigator-status" aria-live="polite"></div>
+
+        <div id="navigator-columns-wrap">
+            <svg id="navigator-path-overlay" aria-hidden="true"></svg>
+            <div id="navigator-columns" aria-live="polite"></div>
+        </div>
+
+        <div id="navigator-path-wrap">
+            <span id="navigator-path-label">Path:</span>
+            <span id="navigator-path"></span>
+        </div>
+
+        <div id="navigator-buttons">
+            <button id="navigator-back" type="button" onclick="demo.navigatorBack()" disabled>Back one step</button>
+            <button id="navigator-reset" type="button" onclick="demo.navigatorReset()" disabled>Reset</button>
+            <button id="navigator-exit" type="button" onclick="demo.exitNavigator()" disabled>Exit navigator</button>
+        </div>
+    </div>
 </details>
 
 </body>

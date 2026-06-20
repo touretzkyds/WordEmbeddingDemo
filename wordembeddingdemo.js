@@ -133,6 +133,23 @@ class Demo {
 
         // create placeholder for similarity lines
         this.similarityLines = [];
+
+        // NeighborNavigator state
+        this.navigator = {
+            active: false,
+            startWord: "",
+            targetWord: "",
+            hintOn: false,
+            reachable: false,        // whether the target is reachable from the starting world
+            history: [],             // step stack as {word, neighbors, remaining, nextHint, scatterSnapshot}
+            savedScatterWords: null, // to restore the words in the scatter plot after NN finishes
+            savedSelectedWord: "",
+            maxSteps: 7,             // default step cap (relaxed when the shortest path is longer)
+            shortest: Infinity       // BFS distance from start to target
+        };
+        this.NAVIGATOR_NEIGHBOR_COUNT = 10;
+        this.NAVIGATOR_MAX_STEPS = 7;
+        this.NAVIGATOR_PATH_LINE_TEXT_GAP = 4; // pixel gap between path lines and word
     }
 
     cloneFeatureWordsPairs(featureWordsPairs) {
@@ -274,6 +291,7 @@ class Demo {
     resetStateForSource(preferredScatterWords = null) {
         this.analogy = {};
         this.selectedWord = "";
+        this.resetNavigatorState();
         this.dataScatter = null;
         this.plotWords = [];
         this.hoverX = 0;
@@ -332,11 +350,28 @@ class Demo {
         analogyDetails.ontoggle = () => this.handleAnalogyToggle(analogyDetails);
 
         // auto-scroll the lower panels into view when they are opened
-        for (const panelId of ["odd-one-out-details", "custom-details"]) {
+        for (const panelId of ["odd-one-out-details", "custom-details", "navigator-details"]) {
             const panel = document.getElementById(panelId);
             if (panel) {
                 panel.addEventListener("toggle", () => this.scrollPanelIntoView(panel));
             }
+        }
+
+        const navigatorHintToggle = document.getElementById("navigator-hint-toggle");
+        if (navigatorHintToggle) {
+            navigatorHintToggle.addEventListener("change", (event) => {
+                this.setNavigatorHint(event.target.checked);
+            });
+        }
+
+        const navigatorColumns = document.getElementById("navigator-columns");
+        if (navigatorColumns && navigatorColumns.dataset.boundScroll !== "true") {
+            navigatorColumns.addEventListener("scroll", () => {
+                if (this.navigator.active) {
+                    this.updateNavigatorPathLines();
+                }
+            });
+            navigatorColumns.dataset.boundScroll = "true";
         }
 
         const plotly_scatter = document.getElementById("plotly-scatter");
@@ -496,6 +531,7 @@ class Demo {
     clearPlotsForSourceSwitch() {
         this.selectedWord = "";
         this.analogy = {};
+        this.resetNavigatorState();
         this.dataScatter = null;
         this.plotWords = [];
         this.removeSimilarityLines();
@@ -615,9 +651,22 @@ class Demo {
         const y = plotWords.map(word => this.vecs.get(word).dot(this.features[0]));
         const z = plotWords.map(word => this.vecs.get(word).dot(this.features[1]));
 
+        // NeighborNavigator highlight words
+        const navActive = this.navigator.active;
+        const navCurrent = navActive && this.navigator.history.length > 0
+            ? this.navigator.history[this.navigator.history.length - 1].word
+            : "";
+        const navTarget = navActive ? this.navigator.targetWord : "";
+        const navHint = this.navigatorHintWord();
+
         // color points by type with priority (#12)
         const color = plotWords.map(word =>
-            (word === this.selectedWord) ? "red" // selected word has highest priority
+            // Neighbor Navigator colors take priority while a game is active
+            (navActive && word === navTarget) ? "#2ca02c"   // target: green
+            : (navActive && word === navCurrent) ? "red"    // current word: red
+            : (navActive && word === navHint) ? "#ff7f0e"   // hint: orange
+            : navActive ? "#1f77b4"                         // other neighbors: blue
+            : (word === this.selectedWord) ? "red" // selected word has highest priority
             : (word === this.analogy.y) ? "pink"
             : (word === this.analogy.Wstar) ? "lime"
             : (Object.values(this.analogy).includes(word)) ? "blue"
@@ -766,7 +815,11 @@ class Demo {
 
         // always make new plot (#9)
         // replotting scatter3d produces ugly error (#10)
-        Plotly.newPlot("plotly-scatter", data, layout);
+        Plotly.newPlot("plotly-scatter", data, layout).then(() => {
+            if (this.navigator.active) {
+                this.updateNavigatorScatterBanner();
+            }
+        });
 
         let plotly_scatter = document.getElementById("plotly-scatter");
         // remove old listeners before rebinding to avoid duplicate click toggles
@@ -810,6 +863,7 @@ class Demo {
         }
         this.scatterWords = [];
         this.analogy = {};
+        this.resetNavigatorState();
 
         this.vectorWords = new Array(this.VECTOR_DISPLAY_SIZE).fill(this.EMPTY_FEATURE_NAME);
 
@@ -1279,7 +1333,9 @@ class Demo {
         // Can consider to update this.vectorWords to the 4 words from OddOneOut in the future
 
         message.classList.remove("odd-one-out-error");
-        message.innerText = `Odd one out: ${outlier.word} (avg cosine: ${outlier.score.toFixed(3)})`;
+        const clusterAvg = this.computeClusterAverageCosine(outlier.index, similarityMatrix);
+        message.innerText =
+            `Odd One Out: ${outlier.word} (avg odd one cosine: ${outlier.score.toFixed(3)}); avg in-group cosine: ${clusterAvg.toFixed(3)}`;
         result.innerText = outlier.word;
         this.renderOddOneOutPlot(points, words, outlier.index, similarityMatrix, outlier.scores, linkMetrics);
     }
@@ -1313,33 +1369,30 @@ class Demo {
         return { index, word: words[index], score: scores[index], scores };
     }
 
-    projectOddOneOutTo2D(similarityMatrix) {
-        const n = similarityMatrix.length;
-        if (n === 0) {
-            return {points: [], linkMetrics: new Map()};
+    computeClusterAverageCosine(outlierIndex, similarityMatrix) {
+        const clusterIndices = [];
+        for (let i = 0; i < similarityMatrix.length; i++) {
+            if (i !== outlierIndex) {
+                clusterIndices.push(i);
+            }
+        }
+        if (clusterIndices.length < 2) {
+            return 0;
         }
 
-        const springConfig = {
-            minDistance: 0.5,
-            maxDistance: 2.2,
-            minStrength: 0.08,
-            maxStrength: 0.42,
-            distanceExponent: 1.9,
-            strengthExponent: 2.1,
-            similarityEpsilon: 1e-6,
-            chargeStrength: -0.6,
-            collideRadius: 0.25,
-            iterations: 360,
-            seed: 0x9e3779b9 // use fixed seed so that layout is determined, but the orientation is different
-        };
+        let total = 0;
+        let count = 0;
+        for (let a = 0; a < clusterIndices.length; a++) {
+            for (let b = a + 1; b < clusterIndices.length; b++) {
+                total += similarityMatrix[clusterIndices[a]][clusterIndices[b]];
+                count++;
+            }
+        }
+        return total / count;
+    }
 
-        // Deterministic seed
-        // The arbitrary-axes appearance is added later by a random rigid transform
-        const nodes = new Array(n).fill(0).map((_, i) => {
-            const angle = (2 * Math.PI * i) / n;
-            return {id: i, x: Math.cos(angle), y: Math.sin(angle)};
-        });
-
+    buildOddOneOutLinks(similarityMatrix, springConfig) {
+        const n = similarityMatrix.length;
         const pairSimilarities = [];
         for (let i = 0; i < n; i++) {
             for (let j = i + 1; j < n; j++) {
@@ -1382,9 +1435,55 @@ class Demo {
                 });
             }
         }
+        return {links, pairSimilarities};
+    }
+
+    getOddOneOutSquareStarts(n = 4) {
+        const TL = {x: -1, y:1};
+        const TR = {x: 1, y:1};
+        const BL = {x: -1, y: -1};
+        const BR = {x: 1, y: -1};
+
+        // Three square topologies
+        const cornerAssignments = [
+            [TL, TR, BR, BL], // A-B, D-C
+            [TL, BR, TR, BL], // A-C, D-B
+            [TL, BL, TR, BR]  // A-C, B-D
+        ];
+
+        const starts = [];
+        for (const corners of cornerAssignments) {
+            const nodes = corners.slice(0, n).map((corner, id) => ({
+                id,
+                x:corner.x,
+                y:corner.y
+            }));
+            starts.push(nodes);
+            starts.push(nodes.map(node => ({
+                id: node.id,
+                x: -node.y,
+                y: node.x
+            })));
+        }
+        return starts;
+    }
+
+    runOddOneOutSpringSimulation(initialNodes, linkTemplate, springConfig, startIndex) {
+        const nodes = initialNodes.map(node => ({
+            id: node.id,
+            x:node.x,
+            y:node.y
+        }));
+        const links = linkTemplate.map(link => ({
+            source: link.source,
+            target: link.target,
+            similarity: link.similarity,
+            targetDistance: link.targetDistance,
+            springStrength: link.springStrength
+        }));
 
         const simulation = d3.forceSimulation(nodes)
-            .randomSource(this.makeSeededRandom(springConfig.seed))
+            .randomSource(this.makeSeededRandom(springConfig.seed + startIndex))
             .force("link", d3.forceLink(links)
                 .id(d => d.id)
                 .distance(link => link.targetDistance)
@@ -1393,6 +1492,8 @@ class Demo {
             .force("charge", d3.forceManyBody().strength(springConfig.chargeStrength))
             .force("center", d3.forceCenter(0, 0))
             .force("collide", d3.forceCollide(springConfig.collideRadius))
+            .alpha(springConfig.alpha)
+            .alphaDecay(springConfig.alphaDecay)
             .stop();
 
         for (let i = 0; i < springConfig.iterations; i++) {
@@ -1400,12 +1501,144 @@ class Demo {
         }
         simulation.stop();
 
-        const linkMetrics = this.computeOddOneOutLinkMetrics(links);
-
-        // Distances/ordering are now fixed; randomize only the global orientation for display.
         const points = nodes.map(node => ({x: node.x, y: node.y}));
-        this.applyRandomDisplayTransform(points);
+        const linkMetrics = this.computeOddOneOutLinkMetrics(links);
         return {points, linkMetrics};
+    }
+
+    rankValues(values) {
+        const indexed = values.map((value, index) => ({value, index}));
+        indexed.sort((a, b) => a.value - b.value);
+
+        const ranks = new Array(values.length);
+        let start = 0;
+        while (start < indexed.length) {
+            let end = start;
+            while (end + 1 < indexed.length && indexed[end + 1].value === indexed[start].value) {
+                end++;
+            }
+            const averageRank = (start + end + 2) / 2;
+            for (let i = start; i <= end; i++) {
+                ranks[indexed[i].index] = averageRank;
+            }
+            start = end + 1;
+        }
+        return ranks;
+    }
+    // Calculate Pearson correlation coefficient
+    pearsonCorrelation(x, y) {
+        const n = x.length;
+        if (n < 2) {
+            return 0;
+        }
+        const meanX = x.reduce((sum, value) => sum + value, 0) / n;
+        const meanY = y.reduce((sum, value) => sum + value, 0) / n;
+        let numerator = 0;
+        let denominatorX = 0;
+        let denominatorY = 0;
+        for (let i = 0; i < n; i++) {
+            const dx = x[i] - meanX;
+            const dy = y[i] - meanY;
+            numerator += dx * dy;
+            denominatorX += dx * dx;
+            denominatorY += dy * dy;
+        }
+        if (denominatorX === 0 || denominatorY === 0) {
+            return 0;
+        }
+        return numerator / Math.sqrt(denominatorX * denominatorY);
+    }
+    
+    // Calculate Spearman correlation coefficient to test the right ranking for the best layout
+    spearmanCorrelation(x, y) {
+        return this.pearsonCorrelation(this.rankValues(x), this.rankValues(y));
+    }
+
+    scoreOddOneOutLayout(points, similarityMatrix, linkTemplate) {
+        const similarities = [];
+        const negDistances = [];
+        let stress = 0;
+
+        for (let i = 0; i < points.length; i++) {
+            for (let j = i + 1; j < points.length; j++) {
+                const dx = points[i].x - points[j].x;
+                const dy = points[i].y - points[j].y;
+                const distance = Math.sqrt(dx * dx + dy * dy);
+                similarities.push(similarityMatrix[i][j]);
+                negDistances.push(-distance);
+
+                const link = linkTemplate.find(candidate =>
+                    (candidate.source === i && candidate.target === j) ||
+                    (candidate.source === j && candidate.target === i)
+                );
+                if (link) {
+                    const delta = distance - link.targetDistance;
+                    stress += delta * delta;
+                }
+            }
+        }
+
+        return {
+            spearman: this.spearmanCorrelation(similarities, negDistances),
+            pearson: this.pearsonCorrelation(similarities, negDistances),
+            stress
+        };
+    }
+
+    compareOddOneOutLayoutScores(candidateScore, bestScore) {
+        if (candidateScore.spearman !== bestScore.spearman) {
+            return candidateScore.spearman > bestScore.spearman ? 1 : -1;
+        }
+        if (candidateScore.pearson !== bestScore.pearson) {
+            return candidateScore.pearson > bestScore.pearson ? 1 : -1;
+        }
+        if (candidateScore.stress !== bestScore.stress) {
+            return candidateScore.stress < bestScore.stress ? 1 : -1;
+        }
+        return 0;
+    }
+
+    projectOddOneOutTo2D(similarityMatrix) {
+        const n = similarityMatrix.length;
+        if (n === 0) {
+            return {points: [], linkMetrics: new Map()};
+        }
+
+        const springConfig = {
+            minDistance: 0.5,
+            maxDistance: 2.2,
+            minStrength: 0.08,
+            maxStrength: 0.42,
+            distanceExponent: 1.2,
+            strengthExponent: 1.3,
+            similarityEpsilon: 1e-6,
+            chargeStrength: -0.25,
+            collideRadius: 0.25,
+            iterations: 550,
+            alpha: 0.3,
+            alphaDecay: 0.01,
+            seed: 0x9e3779b9
+        };
+
+        const {links: linkTemplate} = this.buildOddOneOutLinks(similarityMatrix, springConfig);
+        const starts = this.getOddOneOutSquareStarts(n);
+        let bestLayout = null;
+        starts.forEach((initialNodes, startIndex) => {
+            const {points, linkMetrics} = this.runOddOneOutSpringSimulation(
+                initialNodes,
+                linkTemplate,
+                springConfig,
+                startIndex
+            );
+            const score = this.scoreOddOneOutLayout(points, similarityMatrix, linkTemplate);
+            const candidate = {points, linkMetrics, score};
+            if (!bestLayout || this.compareOddOneOutLayoutScores(candidate.score, bestLayout.score) > 0) {
+                bestLayout = candidate;
+            }
+        });
+
+        this.applyRandomDisplayTransform(bestLayout.points);
+        return {points: bestLayout.points, linkMetrics: bestLayout.linkMetrics};
     }
 
     // deterministic PRNG
@@ -2110,7 +2343,13 @@ class Demo {
         }
         const ptNum = this.dataScatter.points[0].pointNumber;
         const clickedWord = this.plotWords[ptNum];
-        
+
+        // NeighborNavigator takes over scatter clicks while playing (exclusive)
+        if (this.navigator.active) {
+            this.navigatorStep(clickedWord);
+            return;
+        }
+
         // actions if user clicks on (ie selects or deselects) a word in scatter plot
         if (clickedWord === this.selectedWord) { // deselect
             this.highlightVectorAxis(false); // turn off highlight prompt for vector plot
@@ -2128,6 +2367,622 @@ class Demo {
         this.plotScatter();
         // replot with similarity values
         this.plotMagnify();
+    }
+
+    // NeighborNavigator
+    // Breadth-first search over the directed nearest-neighbor graph
+    // Edges point from a word to each of its nearest words
+    // If the target is unreachable, steps is Infinity and nextWord is null
+    navigatorShortestSteps(fromWord, toWord) {
+        if (fromWord === toWord) {
+            return {steps: 0, nextWord: null};
+        }
+        const visited = new Set([fromWord]);
+        const parent = new Map();
+        let frontier = [fromWord];
+        let depth = 0;
+
+        while (frontier.length > 0) {
+            depth++;
+            const next = [];
+            for (const word of frontier) {
+                const neighbors = this.nearestWords.get(word) || [];
+                for (const neighbor of neighbors) {
+                    if (visited.has(neighbor)) {
+                        continue;
+                    }
+                    visited.add(neighbor);
+                    parent.set(neighbor, word);
+                    if (neighbor === toWord) {
+                        // walk parents back to the word close to fromWord
+                        let step = neighbor;
+                        while (parent.get(step) !== fromWord) {
+                            step = parent.get(step);
+                        }
+                        return {steps: depth, nextWord: step};
+                    }
+                    next.push(neighbor);
+                }
+            }
+            frontier = next;
+        }
+        return {steps: Infinity, nextWord: null};
+    }
+
+    // Fallback for when the target is unreachable:
+    // pick the current word's neighbor with the highest cosine similarity to the target
+    navigatorGreedyNext(fromWord, toWord) {
+        const neighbors = this.nearestWords.get(fromWord) || [];
+        const targetVec = this.vecs.get(toWord);
+        if (!targetVec) {
+            return null;
+        }
+        let bestWord = null;
+        let bestScore = -Infinity;
+        for (const neighbor of neighbors) {
+            const vec = this.vecs.get(neighbor);
+            if (!vec) {
+                continue;
+            }
+            const score = this.cosine(vec, targetVec);
+            if (score > bestScore) {
+                bestScore = score;
+                bestWord = neighbor;
+            }
+        }
+        return bestWord;
+    }
+
+    // Determine how many steps remain to reach the target word and suggest the next best move
+    // Use shortest-path hints if reachable, otherwise use greedy similarity hints
+    navigatorComputeGuidance(fromWord) {
+        const target = this.navigator.targetWord;
+        if (fromWord === target) {
+            return {remaining: 0, nextHint: null, reachable: true};
+        }
+        const {steps, nextWord} = this.navigatorShortestSteps(fromWord, target);
+        if (steps !== Infinity) {
+            return {remaining: steps, nextHint: nextWord, reachable: true};
+        }
+        return {remaining: Infinity, nextHint: this.navigatorGreedyNext(fromWord, target), reachable: false};
+    }
+
+    // Build the scatterplot for the current navigator step, with the word and its nearest words
+    navigatorSceneFor(word) {
+        const neighbors = this.nearestWords.get(word) || [];
+        const scene = [word, ...neighbors.slice(0, this.NAVIGATOR_NEIGHBOR_COUNT)];
+        return [...new Set(scene)].filter(w => this.vecs.has(w));
+    }
+
+    // Begin a navigation run
+    startNavigator() {
+        if (!this.guardModelReady("Load an embedding source first.")) {
+            return;
+        }
+        const message = document.getElementById("navigator-message");
+        const startWord = this.cleanWordInput(document.getElementById("navigator-start").value);
+        const targetWord = this.cleanWordInput(document.getElementById("navigator-target").value);
+
+        const setError = (text) => {
+            message.classList.add("navigator-error");
+            message.innerText = text;
+        };
+
+        if (startWord === "" || targetWord === "") {
+            setError("Please enter both a start word and a target word.");
+            return;
+        }
+        if (!this.vocab.has(startWord)) {
+            setError(`"${startWord}" not found in this embedding.`);
+            return;
+        }
+        if (!this.vocab.has(targetWord)) {
+            setError(`"${targetWord}" not found in this embedding.`);
+            return;
+        }
+        if (startWord === targetWord) {
+            setError("Start and target words must be different.");
+            return;
+        }
+
+        message.classList.remove("navigator-error");
+        message.innerText = "";
+
+        // Save the current scene so after NN the original scatterplot will be restored
+        if (!this.navigator.active) {
+            this.navigator.savedScatterWords = this.scatterWords.slice();
+            this.navigator.savedSelectedWord = this.selectedWord;
+        }
+
+        // leave any prior modes clean before NN takes over the scatter plot
+        this.analogy = {};
+        this.selectedWord = "";
+        this.highlightVectorAxis(false);
+        this.formatMagnitudePlot("default");
+        this.updateSimilarityLines(true, false);
+
+        this.navigator.active = true;
+        this.navigator.startWord = startWord;
+        this.navigator.targetWord = targetWord;
+        this.navigator.hintOn = document.getElementById("navigator-hint-toggle").checked;
+        this.navigator.history = [];
+
+        // BFS feasibility check up front
+        // verify a path within the default step limit exists
+        const {steps: shortest} = this.navigatorShortestSteps(startWord, targetWord);
+        this.navigator.shortest = shortest;
+        this.navigator.reachable = (shortest !== Infinity);
+
+        if (shortest <= this.NAVIGATOR_MAX_STEPS) {
+            this.navigator.maxSteps = this.NAVIGATOR_MAX_STEPS;
+            const stepWord = shortest === 1 ? "step" : "steps";
+            message.classList.remove("navigator-error");
+            message.innerText =
+                `Shortest path: ${shortest} ${stepWord} from "${startWord}" to "${targetWord}" (limit ${this.NAVIGATOR_MAX_STEPS}).`;
+        } else if (shortest !== Infinity) {
+            // Reachable; but longer than the default limit
+            // relax the limit to the true shortest path
+            this.navigator.maxSteps = shortest;
+            message.classList.add("navigator-error");
+            message.innerText =
+                `Warning: "${targetWord}" needs at least ${shortest} steps from "${startWord}", more than the usual ${this.NAVIGATOR_MAX_STEPS}. Step limit relaxed to ${shortest}.`;
+        } else {
+            // Unreachable over the nearest-neighbor graph; lift the limit (similarity hints only, as a fallback)
+            this.navigator.maxSteps = Infinity;
+            message.classList.add("navigator-error");
+            message.innerText =
+                `Warning: "${targetWord}" is not reachable from "${startWord}" through nearest neighbors. Explore freely; hints will follow similarity.`;
+        }
+
+        const startGuidance = this.navigatorComputeGuidance(startWord);
+        this.navigatorRecordStep(startWord, startGuidance);
+        this.plotMagnify(false);
+        this.updateNavigatorScatterBanner();
+    }
+
+    updateNavigatorScatterBanner() {
+        const banner = document.getElementById("navigator-scatter-banner");
+        if (!banner) {
+            return;
+        }
+        banner.hidden = !this.navigator.active;
+        if (!this.navigator.active) {
+            return;
+        }
+        requestAnimationFrame(() => this.positionNavigatorScatterBanner());
+    }
+
+    // Update the banner position to align with the title
+    positionNavigatorScatterBanner() {
+        const banner = document.getElementById("navigator-scatter-banner");
+        const parent = document.getElementById("plotly-scatter");
+        if (!banner || !parent || banner.hidden) {
+            return;
+        }
+        const titleEl = parent.querySelector(".g-gtitle text");
+        if (!titleEl) {
+            banner.style.top = "8px";
+            return;
+        }
+        const rectTitle = titleEl.getBoundingClientRect();
+        const rectParent = parent.getBoundingClientRect();
+        const titleCenterY = (rectTitle.top - rectParent.top) + rectTitle.height / 2;
+        const bannerTitle = banner.querySelector(".navigator-scatter-banner-title");
+        const bannerRect = banner.getBoundingClientRect();
+        let alignOffset = bannerRect.height / 2;
+        if (bannerTitle) {
+            const bannerTitleRect = bannerTitle.getBoundingClientRect();
+            alignOffset = (bannerTitleRect.top - bannerRect.top) + bannerTitleRect.height / 2;
+        }
+        banner.style.top = `${Math.max(0, Math.round(titleCenterY - alignOffset))}px`;
+    }
+
+    // Select a word from the column that lists neighbors of history[baseIndex]
+    // Stepback to that column, delete columns to the right, and step to that word
+    navigatorSelectFrom(baseIndex, word) {
+        if (!this.navigator.active || !this.vecs.has(word)) {
+            return;
+        }
+        const history = this.navigator.history;
+        if (baseIndex < 0 || baseIndex >= history.length) {
+            return;
+        }
+        const base = history[baseIndex];
+        // clicking the word you are already standing on is useless
+        if (base.word === word) {
+            return;
+        }
+        // only allow jumping to an actual nearest word of the base word
+        const reachableNeighbors = (this.nearestWords.get(base.word) || [])
+            .slice(0, this.NAVIGATOR_NEIGHBOR_COUNT);
+        if (!reachableNeighbors.includes(word)) {
+            return;
+        }
+        // enforce the step limit
+        if (baseIndex + 1 > this.navigator.maxSteps) {
+            const message = document.getElementById("navigator-message");
+            if (message) {
+                message.classList.add("navigator-error");
+                message.innerText = `Step limit reached (${this.navigator.maxSteps}). Use Back or Reset to try another path.`;
+            }
+            return;
+        }
+        // drop the picked word and everything after it, then step forward
+        this.navigator.history = history.slice(0, baseIndex + 1);
+        const guidance = this.navigatorComputeGuidance(word);
+        this.navigatorRecordStep(word, guidance);
+    }
+
+    // Scatter-plot clicks select from the latest column
+    navigatorStep(word) {
+        this.navigatorSelectFrom(this.navigator.history.length - 1, word);
+    }
+
+    // Miller-column clicks select from an arbitrary column
+    navigatorColumnSelect(baseIndex, word) {
+        this.navigatorSelectFrom(baseIndex, word);
+    }
+
+    // Update the scatterplot after click 
+    navigatorRecordStep(word, guidance) {
+        const neighbors = (this.nearestWords.get(word) || []).slice(0, this.NAVIGATOR_NEIGHBOR_COUNT);
+        this.scatterWords = this.navigatorSceneFor(word);
+
+        this.navigator.history.push({
+            word,
+            neighbors,
+            remaining: guidance.remaining,
+            nextHint: guidance.nextHint,
+            scatterSnapshot: this.scatterWords.slice()
+        });
+
+        this.plotScatter();
+        this.renderNavigatorPanel();
+    }
+
+    // Undo the most recent step
+    navigatorBack() {
+        if (!this.navigator.active || this.navigator.history.length <= 1) {
+            return;
+        }
+        this.navigator.history.pop();
+        const step = this.navigator.history[this.navigator.history.length - 1];
+        this.scatterWords = step.scatterSnapshot.slice();
+        this.plotScatter();
+        this.renderNavigatorPanel();
+    }
+
+    // Jump back to an recorded step
+    navigatorJumpTo(index) {
+        if (!this.navigator.active || index < 0 || index >= this.navigator.history.length) {
+            return;
+        }
+        this.navigator.history = this.navigator.history.slice(0, index + 1);
+        const step = this.navigator.history[this.navigator.history.length - 1];
+        this.scatterWords = step.scatterSnapshot.slice();
+        this.plotScatter();
+        this.renderNavigatorPanel();
+    }
+
+    // Restart from the original start word with the same target
+    navigatorReset() {
+        if (!this.navigator.active) {
+            return;
+        }
+        this.navigator.history = [];
+        const startGuidance = this.navigatorComputeGuidance(this.navigator.startWord);
+        this.navigator.reachable = startGuidance.reachable;
+        this.navigatorRecordStep(this.navigator.startWord, startGuidance);
+    }
+
+    // Restore the scenes existed before NN started
+    exitNavigator() {
+        if (!this.navigator.active) {
+            return;
+        }
+        if (Array.isArray(this.navigator.savedScatterWords)) {
+            this.scatterWords = this.navigator.savedScatterWords.filter(w => this.vecs.has(w));
+        }
+        this.selectedWord = (this.navigator.savedSelectedWord && this.vecs.has(this.navigator.savedSelectedWord))
+            ? this.navigator.savedSelectedWord
+            : "";
+
+        this.navigator.active = false;
+        this.navigator.history = [];
+        this.navigator.savedScatterWords = null;
+        this.navigator.savedSelectedWord = "";
+
+        this.renderNavigatorPanel();
+        if (this.modelReady) {
+            this.plotScatter();
+        }
+        this.updateNavigatorScatterBanner();
+    }
+
+    // Clear navigator state without restoring a scene
+    // Eg. when the surrounding scene is being rebuilt like source switch or clear all
+    resetNavigatorState() {
+        this.navigator.active = false;
+        this.navigator.startWord = "";
+        this.navigator.targetWord = "";
+        this.navigator.reachable = false;
+        this.navigator.history = [];
+        this.navigator.savedScatterWords = null;
+        this.navigator.savedSelectedWord = "";
+        const message = document.getElementById("navigator-message");
+        if (message) {
+            message.classList.remove("navigator-error");
+            message.innerText = "";
+        }
+        this.renderNavigatorPanel();
+        this.updateNavigatorScatterBanner();
+    }
+
+    // Toggle hint during the game
+    setNavigatorHint(enabled) {
+        this.navigator.hintOn = enabled;
+        if (this.navigator.active) {
+            this.plotScatter(); // recolor the recommended next word
+            this.renderNavigatorPanel();
+        }
+    }
+
+    navigatorHintWord() {
+        if (!this.navigator.active || !this.navigator.hintOn) {
+            return "";
+        }
+        const current = this.navigator.history[this.navigator.history.length - 1];
+        if (!current || current.word === this.navigator.targetWord) {
+            return "";
+        }
+        return current.nextHint || "";
+    }
+
+    // Miller-column: start column and additional columns for each new word visited 
+    renderNavigatorColumns() {
+        const container = document.getElementById("navigator-columns");
+        if (!container) {
+            return;
+        }
+        this.removeNavigatorPathLines();
+        container.innerHTML = "";
+        if (!this.navigator.active || this.navigator.history.length === 0) {
+            return;
+        }
+
+        const history = this.navigator.history;
+        const target = this.navigator.targetWord;
+        const hintOn = this.navigator.hintOn;
+        const stepsTaken = history.length - 1;
+        const reachedGoal = history[history.length - 1].word === target;
+
+        // Starting column showing the start work
+        container.appendChild(this.buildNavigatorStartColumn(history[0].word, target));
+
+        // One neighbor column per word in the path
+        for (let j = 0; j < history.length; j++) {
+            const isTrailing = (j === history.length - 1);
+            if (isTrailing && (reachedGoal || stepsTaken >= this.navigator.maxSteps)) {
+                break; // can't move further once reached the goal or the step limit is hit
+            }
+            const base = history[j];
+            const selectedWord = isTrailing ? null : history[j + 1].word;
+            const hintWord = (hintOn && base.word !== target) ? base.nextHint : null;
+            container.appendChild(
+                this.buildNavigatorNeighborColumn(j, base, selectedWord, hintWord, target)
+            );
+        }
+        requestAnimationFrame(() => this.updateNavigatorPathLines());
+    }
+   
+    // Add path lines
+
+    measureNavigatorTextWidth(text, style) {
+        if (!this._navigatorMeasureCanvas) {
+            this._navigatorMeasureCanvas = document.createElement("canvas");
+        }
+        const ctx = this._navigatorMeasureCanvas.getContext("2d");
+        ctx.font = `${style.fontWeight} ${style.fontSize} ${style.fontFamily}`;
+        return ctx.measureText(text).width;
+    }
+
+    getNavigatorTextAnchor(element, side, containerEl) {
+        const containerRect = containerEl.getBoundingClientRect();
+        const rect = element.getBoundingClientRect();
+        const style = window.getComputedStyle(element);
+        const textWidth = this.measureNavigatorTextWidth(element.textContent.trim(), style);
+        const paddingLeft = parseFloat(style.paddingLeft) || 0;
+        const gap = this.NAVIGATOR_PATH_LINE_TEXT_GAP; // add gap to look better
+        const x = rect.left - containerRect.left + paddingLeft +
+            (side === "end" ? textWidth + gap : -gap);
+        const y = rect.top - containerRect.top + rect.height / 2;
+        return {x, y};
+    }
+
+    removeNavigatorPathLines() {
+        const svg = document.getElementById("navigator-path-overlay");
+        if (svg) {
+            svg.innerHTML = "";
+        }
+    }
+
+    updateNavigatorPathLines() {
+        const wrap = document.getElementById("navigator-columns-wrap");
+        const svg = document.getElementById("navigator-path-overlay");
+        if (!wrap || !svg) {
+            return;
+        }
+        svg.innerHTML = "";
+        if (!this.navigator.active || this.navigator.history.length < 2) {
+            return;
+        }
+
+        svg.setAttribute("width", String(wrap.clientWidth));
+        svg.setAttribute("height", String(wrap.clientHeight));
+
+        const stepCount = this.navigator.history.length;
+        for (let i = 0; i < stepCount - 1; i++) {
+            const fromEl = wrap.querySelector(`[data-nav-path-step="${i}"]`);
+            const toEl = wrap.querySelector(`[data-nav-path-step="${i + 1}"]`);
+            if (!fromEl || !toEl) {
+                continue;
+            }
+            const from = this.getNavigatorTextAnchor(fromEl, "end", wrap);
+            const to = this.getNavigatorTextAnchor(toEl, "start", wrap);
+            const line = document.createElementNS("http://www.w3.org/2000/svg", "line");
+            line.setAttribute("x1", String(from.x));
+            line.setAttribute("y1", String(from.y));
+            line.setAttribute("x2", String(to.x));
+            line.setAttribute("y2", String(to.y));
+            line.setAttribute("stroke", "#d62728");
+            line.setAttribute("stroke-width", "2");
+            line.setAttribute("stroke-opacity", "0.75");
+            svg.appendChild(line);
+        }
+    }
+
+    buildNavigatorStartColumn(word, target) {
+        const column = document.createElement("div");
+        column.className = "navigator-column navigator-start-column";
+
+        const header = document.createElement("div");
+        header.className = "navigator-column-header";
+        header.textContent = "Start";
+        column.appendChild(header);
+
+        const list = document.createElement("div");
+        list.className = "navigator-column-list";
+        const cell = document.createElement("button");
+        cell.type = "button";
+        cell.className = "navigator-column-item navigator-selected navigator-start-word";
+        if (word === target) {
+            cell.classList.add("navigator-target-node");
+        }
+        cell.textContent = word;
+        cell.title = "Jump back to start";
+        cell.dataset.navPathStep = "0";
+        cell.addEventListener("click", () => this.navigatorJumpTo(0));
+        list.appendChild(cell);
+        column.appendChild(list);
+        return column;
+    }
+
+    buildNavigatorNeighborColumn(baseIndex, base, selectedWord, hintWord, target) {
+        const column = document.createElement("div");
+        column.className = "navigator-column";
+
+        const header = document.createElement("div");
+        header.className = "navigator-column-header";
+        header.textContent = `Neighbors of "${base.word}"`;
+        column.appendChild(header);
+
+        const list = document.createElement("div");
+        list.className = "navigator-column-list";
+
+        for (const neighbor of base.neighbors) {
+            const item = document.createElement("button");
+            item.type = "button";
+            item.className = "navigator-column-item";
+            if (neighbor === selectedWord) {
+                item.classList.add("navigator-selected");
+                item.dataset.navPathStep = String(baseIndex + 1);
+            }
+            if (neighbor === target) {
+                item.classList.add("navigator-target-node");
+            }
+            if (neighbor === hintWord) {
+                item.classList.add("navigator-hint");
+            }
+            item.textContent = neighbor;
+            item.addEventListener("click", () => this.navigatorColumnSelect(baseIndex, neighbor));
+            list.appendChild(item);
+        }
+
+        column.appendChild(list);
+        return column;
+    }
+
+    // NavigatorPanel updates
+    renderNavigatorPanel() {
+        const statusElem = document.getElementById("navigator-status");
+        const pathElem = document.getElementById("navigator-path");
+        const backButton = document.getElementById("navigator-back");
+        const resetButton = document.getElementById("navigator-reset");
+        const exitButton = document.getElementById("navigator-exit");
+
+        const active = this.navigator.active;
+        if (backButton) {
+            backButton.disabled = !active || this.navigator.history.length <= 1;
+        }
+        if (resetButton) {
+            resetButton.disabled = !active;
+        }
+        if (exitButton) {
+            exitButton.disabled = !active;
+        }
+
+        this.renderNavigatorColumns();
+
+        if (!statusElem || !pathElem) {
+            return;
+        }
+
+        if (!active) {
+            statusElem.classList.remove("navigator-success");
+            statusElem.innerText = "";
+            pathElem.innerHTML = "";
+            return;
+        }
+
+        const history = this.navigator.history;
+        const current = history[history.length - 1];
+        const stepsTaken = history.length - 1;
+        const target = this.navigator.targetWord;
+
+        // status line
+        if (current.word === target) {
+            statusElem.classList.add("navigator-success");
+            statusElem.innerText =
+                `Reached "${target}" in ${stepsTaken} step${stepsTaken === 1 ? "" : "s"}!`;
+        } else {
+            statusElem.classList.remove("navigator-success");
+            let remainingText;
+            if (current.remaining === Infinity) {
+                remainingText = `"${target}" is not reachable through nearest neighbors — following similarity instead.`;
+            } else {
+                const stepWord = current.remaining === 1 ? "step" : "steps";
+                remainingText = `Shortest path: ${current.remaining} ${stepWord} to "${target}".`;
+            }
+            let line = `You are at "${current.word}". Steps taken: ${stepsTaken}. ${remainingText}`;
+            if (this.navigator.hintOn && current.nextHint) {
+                line += ` Hint: try "${current.nextHint}".`;
+            }
+            statusElem.innerText = line;
+        }
+
+        // breadcrumb path
+        pathElem.innerHTML = "";
+        history.forEach((step, idx) => {
+            if (idx > 0) {
+                const arrow = document.createElement("span");
+                arrow.className = "navigator-arrow";
+                arrow.textContent = " \u2192 ";
+                pathElem.appendChild(arrow);
+            }
+            const isLast = idx === history.length - 1;
+            const node = document.createElement(isLast ? "span" : "a");
+            node.className = "navigator-path-node" + (isLast ? " navigator-current" : "");
+            if (step.word === target) {
+                node.classList.add("navigator-target-node");
+            }
+            node.textContent = step.word;
+            if (!isLast) {
+                node.href = "javascript:void(0)";
+                node.title = "Jump back to this step";
+                node.addEventListener("click", () => this.navigatorJumpTo(idx));
+            }
+            pathElem.appendChild(node);
+        });
     }
 
     // draw lines between selected word in scatter plot and highlighted similarity words in vector plot (#55)
@@ -2486,4 +3341,8 @@ window.addEventListener('resize', function() {
     // reset leader lines
     demo.removeSimilarityLines(); 
     demo.initSimilarityLines();
+    if (demo.navigator.active) {
+        demo.updateNavigatorPathLines();
+        demo.updateNavigatorScatterBanner();
+    }
 });
