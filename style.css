@@ -255,12 +255,11 @@ body {
     background-color: rgba(242, 242, 242, 0.92);
     text-align: left;
     line-height: 1.3;
-    color: #555;
+    color: red;
 }
 
 .navigator-scatter-banner-title {
     font-weight: 600;
-    color: #333;
 }
 
 .navigator-scatter-banner-hint {
