@@ -6,7 +6,7 @@ import numpy as np
 from heapq import *
 import sys
 
-K = 10  # top-k words
+K = 25  # top-k words (compute extra for word censorship)
 
 def read_model(model_path, normalize=True):
     with open(model_path) as f:

@@ -150,6 +150,10 @@ class Demo {
         this.NAVIGATOR_NEIGHBOR_COUNT = 10;
         this.NAVIGATOR_MAX_STEPS = 7;
         this.NAVIGATOR_PATH_LINE_TEXT_GAP = 4; // pixel gap between path lines and word
+
+        // Adding censored words list. Those words are kept in the embedding model, but hidden (censored) from user's view.
+        this.CENSORED_WORDS = new Set();
+        this.CENSORED_WORDS_URL = "censored_word_list.txt";
     }
 
     cloneFeatureWordsPairs(featureWordsPairs) {
@@ -248,10 +252,38 @@ class Demo {
                 continue;
             }
             const target = entries[0];
-            const words = entries.slice(1);
+            // drop censored neighbors, then keep the remained top 10 as neighbors
+            const words = entries.slice(1)
+                .filter(word => !this.CENSORED_WORDS.has(word))
+                .slice(0, this.NAVIGATOR_NEIGHBOR_COUNT);
             nearestWords.set(target, words);
         }
         return nearestWords;
+    }
+
+    // Load censored word list
+    // If open failed: the set stays empty so nothing breaks
+    async loadCensoredWords() {
+        try {
+            const response = await fetch(this.CENSORED_WORDS_URL);
+            if (!response.ok) {
+                throw new Error(`HTTP ${response.status}`);
+            }
+            const text = await response.text();
+            for (const line of text.split(/\n/)) {
+                const word = line.trim().toLowerCase();
+                if (word !== "") {
+                    this.CENSORED_WORDS.add(word);
+                }
+            }
+        } catch (e) {
+            console.warn(`Could not load censored word list from "${this.CENSORED_WORDS_URL}":`, e);
+        }
+    }
+
+    // A word is usable only if it exists in the model and is not censored
+    isUsableWord(word) {
+        return this.vocab.has(word) && !this.CENSORED_WORDS.has(word);
     }
 
     sanitizeFeatureWordsByVocab() {
@@ -1147,7 +1179,7 @@ class Demo {
                 removedWords.push(word);
                 wordModified = true;
             } else { // add word if in vocab
-                if (this.vocab.has(word)) {
+                if (this.isUsableWord(word)) {
                     this.scatterWords.push(word);
                     addedWords.push(word);
                     wordModified = true;
@@ -1222,7 +1254,7 @@ class Demo {
 
         // Handle not found input words gracefully
         for (const word of inputWords) {
-            if (!(this.vocab.has(word))) {
+            if (!this.isUsableWord(word)) {
                 document.getElementById("analogy-message").innerText = `"${word}" not found`;
                 return;
             }
@@ -1247,7 +1279,11 @@ class Demo {
             .map(word => [word, vecY.dot(this.vecs.get(word))]);
 
         wordAnalogyPairs.sort((a, b) => b[1] - a[1]);
-        const nearestAnalogyWords = wordAnalogyPairs.slice(0, 10).map(pair => pair[0]);
+        // drop censored words from analogy results
+        const nearestAnalogyWords = wordAnalogyPairs
+            .filter(pair => !this.CENSORED_WORDS.has(pair[0]))
+            .slice(0, 10)
+            .map(pair => pair[0]);
         const wordWstar = nearestAnalogyWords[0];
 
         // add nearest words to Y to nearest word list (#12)
@@ -1309,7 +1345,7 @@ class Demo {
         }
 
         for (const word of words) {
-            if (!this.vocab.has(word)) {
+            if (!this.isUsableWord(word)) {
                 markOddOneOutInputError(`"${word}" not found`);
                 return;
             }
@@ -1334,8 +1370,18 @@ class Demo {
 
         message.classList.remove("odd-one-out-error");
         const clusterAvg = this.computeClusterAverageCosine(outlier.index, similarityMatrix);
-        message.innerText =
-            `Odd One Out: ${outlier.word} (avg odd one cosine: ${outlier.score.toFixed(3)}); avg in-group cosine: ${clusterAvg.toFixed(3)}`;
+        const makeColoredValue = (value, color) => {
+            const span = document.createElement("span");
+            span.style.color = color;
+            span.textContent = value.toFixed(3);
+            return span;
+        };
+        message.replaceChildren(
+            document.createTextNode(`Odd One Out: ${outlier.word} (avg odd one cosine: `),
+            makeColoredValue(outlier.score, "#d62728"), // make outlier cosine red
+            document.createTextNode("); avg in-group cosine: "),
+            makeColoredValue(clusterAvg, "#1f77b4") // make cluster cosine blue
+        );
         result.innerText = outlier.word;
         this.renderOddOneOutPlot(points, words, outlier.index, similarityMatrix, outlier.scores, linkMetrics);
     }
@@ -1949,7 +1995,7 @@ class Demo {
         const plotContainer = document.getElementById("odd-one-out-plot");
 
         const state = {
-            message: message ? message.innerText : "",
+            message: message ? message.innerHTML : "",
             messageIsError: Boolean(message && message.classList.contains("odd-one-out-error")),
             result: result ? result.innerText : "----",
             plotData: null,
@@ -1974,7 +2020,7 @@ class Demo {
         const message = document.getElementById("odd-one-out-message");
         if (message) {
             message.classList.toggle("odd-one-out-error", Boolean(state.messageIsError));
-            message.innerText = state.message || "";
+            message.innerHTML = state.message || "";
         }
 
         const result = document.getElementById("odd-one-out-result");
@@ -2056,7 +2102,7 @@ class Demo {
         // ensure all words in vocab
         for (let j=0; j<2; j++) {
             for (const word of featureWordsPairInput[j]) {
-                if (!this.vocab.has(word)) {
+                if (!this.isUsableWord(word)) {
                     this.setFeatureInlineMessage(featureIdx, `"${word}" not found`);
                     return false;
                 }
@@ -2472,11 +2518,11 @@ class Demo {
             setError("Please enter both a start word and a target word.");
             return;
         }
-        if (!this.vocab.has(startWord)) {
+        if (!this.isUsableWord(startWord)) {
             setError(`"${startWord}" not found in this embedding.`);
             return;
         }
-        if (!this.vocab.has(targetWord)) {
+        if (!this.isUsableWord(targetWord)) {
             setError(`"${targetWord}" not found in this embedding.`);
             return;
         }
@@ -3300,6 +3346,9 @@ class Demo {
 
     // fetch wordvecs locally and process
     async main() {
+        // load censored words before any user interaction
+        await this.loadCensoredWords();
+
         // fill default feature for scatterplot before model load
         this.fillDimensionDefault();
         this.resetDropdownAxes();
