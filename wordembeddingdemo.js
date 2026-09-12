@@ -1001,6 +1001,7 @@ class Demo {
         // show or hide lines
         if (visible) {
             this.similarityLines.forEach((line, idx) => {
+                // TODO: add if clause for [empty] slots
                 if (this.vectorWords[idx] !== "[empty]") {
                     line.show();
                 }
